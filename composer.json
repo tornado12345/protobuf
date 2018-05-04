@@ -11,13 +11,13 @@
   "require-dev": {
     "phpunit/phpunit": ">=4.8.0"
   },
+  "suggest": {
+    "ext-bcmath": "Need to support JSON deserialization"
+  },
   "autoload": {
     "psr-4": {
-      "Google\\": "php/src/Google"
-    },
-    "files": [
-      "php/src/Google/Protobuf/descriptor.php",
-      "php/src/Google/Protobuf/descriptor_internal.pb.php"
-    ]
+      "Google\\Protobuf\\": "php/src/Google/Protobuf",
+      "GPBMetadata\\Google\\Protobuf\\": "php/src/GPBMetadata/Google/Protobuf"
+    }
   }
 }

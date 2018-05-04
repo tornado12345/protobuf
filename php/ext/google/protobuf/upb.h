@@ -1,4 +1,46 @@
 // Amalgamated source file
+
+// php.h intentionally defined NDEBUG. We have to define this macro in order to
+// be used together with php.h
+#ifndef NDEBUG
+#define NDEBUG
+#endif
+
+/*
+** upb_decode: parsing into a upb_msg using a upb_msglayout.
+*/
+
+#ifndef UPB_DECODE_H_
+#define UPB_DECODE_H_
+
+/*
+** upb::Message is a representation for protobuf messages.
+**
+** However it differs from other common representations like
+** google::protobuf::Message in one key way: it does not prescribe any
+** ownership between messages and submessages, and it relies on the
+** client to delete each message/submessage/array/map at the appropriate
+** time.
+**
+** A client can access a upb::Message without knowing anything about
+** ownership semantics, but to create or mutate a message a user needs
+** to implement the memory management themselves.
+**
+** Currently all messages, arrays, and maps store a upb_alloc* internally.
+** Mutating operations use this when they require dynamically-allocated
+** memory.  We could potentially eliminate this size overhead later by
+** letting the user flip a bit on the factory that prevents this from
+** being stored.  The user would then need to use separate functions where
+** the upb_alloc* is passed explicitly.  However for handlers to populate
+** such structures, they would need a place to store this upb_alloc* during
+** parsing; upb_handlers don't currently have a good way to accommodate this.
+**
+** TODO: UTF-8 checking?
+**/
+
+#ifndef UPB_MSG_H_
+#define UPB_MSG_H_
+
 /*
 ** Defs are upb's internal representation of the constructs that can appear
 ** in a .proto file:
@@ -62,12 +104,6 @@
 #ifndef UPB_TABLE_H_
 #define UPB_TABLE_H_
 
-// php.h intentionally defined NDEBUG. We have to define this macro in order to
-// be used together with php.h
-#ifndef NDEBUG
-#define NDEBUG
-#endif
-
 #include <stdint.h>
 #include <string.h>
 /*
@@ -106,6 +142,9 @@ template <int N> class InlinedEnvironment;
 #define UPB_INLINE static
 #endif
 
+/* Hints to the compiler about likely/unlikely branches. */
+#define UPB_LIKELY(x) __builtin_expect((x),1)
+
 /* Define UPB_BIG_ENDIAN manually if you're on big endian and your compiler
  * doesn't provide these preprocessor symbols. */
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
@@ -123,20 +162,21 @@ template <int N> class InlinedEnvironment;
 #define UPB_NORETURN
 #endif
 
+#if __STDC_VERSION__ >= 199901L || __cplusplus >= 201103L
+/* C99/C++11 versions. */
+#include <stdio.h>
+#define _upb_snprintf snprintf
+#define _upb_vsnprintf vsnprintf
+#define _upb_va_copy(a, b) va_copy(a, b)
+#elif defined __GNUC__
 /* A few hacky workarounds for functions not in C89.
  * For internal use only!
  * TODO(haberman): fix these by including our own implementations, or finding
  * another workaround.
  */
-#ifdef __GNUC__
 #define _upb_snprintf __builtin_snprintf
 #define _upb_vsnprintf __builtin_vsnprintf
 #define _upb_va_copy(a, b) __va_copy(a, b)
-#elif __STDC_VERSION__ >= 199901L
-/* C99 versions. */
-#define _upb_snprintf snprintf
-#define _upb_vsnprintf vsnprintf
-#define _upb_va_copy(a, b) va_copy(a, b)
 #else
 #error Need implementations of [v]snprintf and va_copy
 #endif
@@ -280,6 +320,12 @@ template <int N> class InlinedEnvironment;
  * exist in debug mode.  This turns into regular assert. */
 #define UPB_ASSERT_DEBUGVAR(expr) assert(expr)
 
+#ifdef __GNUC__
+#define UPB_UNREACHABLE() do { assert(0); __builtin_unreachable(); } while(0)
+#else
+#define UPB_UNREACHABLE() do { assert(0); } while(0)
+#endif
+
 /* Generic function type. */
 typedef void upb_func();
 
@@ -359,6 +405,16 @@ class PointerBase2 : public PointerBase<T, Base> {
 }
 
 #endif
+
+/* A list of types as they are encoded on-the-wire. */
+typedef enum {
+  UPB_WIRE_TYPE_VARINT      = 0,
+  UPB_WIRE_TYPE_64BIT       = 1,
+  UPB_WIRE_TYPE_DELIMITED   = 2,
+  UPB_WIRE_TYPE_START_GROUP = 3,
+  UPB_WIRE_TYPE_END_GROUP   = 4,
+  UPB_WIRE_TYPE_32BIT       = 5
+} upb_wiretype_t;
 
 
 /* upb::ErrorSpace ************************************************************/
@@ -513,17 +569,18 @@ struct upb_alloc {
 };
 
 UPB_INLINE void *upb_malloc(upb_alloc *alloc, size_t size) {
-  UPB_ASSERT(size > 0);
+  UPB_ASSERT(alloc);
   return alloc->func(alloc, NULL, 0, size);
 }
 
 UPB_INLINE void *upb_realloc(upb_alloc *alloc, void *ptr, size_t oldsize,
                              size_t size) {
-  UPB_ASSERT(size > 0);
+  UPB_ASSERT(alloc);
   return alloc->func(alloc, ptr, oldsize, size);
 }
 
 UPB_INLINE void upb_free(upb_alloc *alloc, void *ptr) {
+  assert(alloc);
   alloc->func(alloc, ptr, 0, 0);
 }
 
@@ -572,11 +629,11 @@ UPB_BEGIN_EXTERN_C
 void upb_arena_init(upb_arena *a);
 void upb_arena_init2(upb_arena *a, void *mem, size_t n, upb_alloc *alloc);
 void upb_arena_uninit(upb_arena *a);
-upb_alloc *upb_arena_alloc(upb_arena *a);
 bool upb_arena_addcleanup(upb_arena *a, upb_cleanup_func *func, void *ud);
 size_t upb_arena_bytesallocated(const upb_arena *a);
 void upb_arena_setnextblocksize(upb_arena *a, size_t size);
 void upb_arena_setmaxblocksize(upb_arena *a, size_t size);
+UPB_INLINE upb_alloc *upb_arena_alloc(upb_arena *a) { return (upb_alloc*)a; }
 
 UPB_END_EXTERN_C
 
@@ -687,7 +744,7 @@ void upb_env_uninit(upb_env *e);
 
 void upb_env_initonly(upb_env *e);
 
-upb_arena *upb_env_arena(upb_env *e);
+UPB_INLINE upb_arena *upb_env_arena(upb_env *e) { return (upb_arena*)e; }
 bool upb_env_ok(const upb_env *e);
 void upb_env_seterrorfunc(upb_env *e, upb_error_func *func, void *ud);
 
@@ -807,7 +864,9 @@ typedef enum {
   UPB_CTYPE_CSTR     = 6,
   UPB_CTYPE_PTR      = 7,
   UPB_CTYPE_CONSTPTR = 8,
-  UPB_CTYPE_FPTR     = 9
+  UPB_CTYPE_FPTR     = 9,
+  UPB_CTYPE_FLOAT    = 10,
+  UPB_CTYPE_DOUBLE   = 11
 } upb_ctype_t;
 
 typedef struct {
@@ -881,6 +940,29 @@ FUNCS(constptr, constptr,     const void*,  uintptr_t,  UPB_CTYPE_CONSTPTR)
 FUNCS(fptr,     fptr,         upb_func*,    uintptr_t,  UPB_CTYPE_FPTR)
 
 #undef FUNCS
+
+UPB_INLINE void upb_value_setfloat(upb_value *val, float cval) {
+  memcpy(&val->val, &cval, sizeof(cval));
+  SET_TYPE(val->ctype, UPB_CTYPE_FLOAT);
+}
+
+UPB_INLINE void upb_value_setdouble(upb_value *val, double cval) {
+  memcpy(&val->val, &cval, sizeof(cval));
+  SET_TYPE(val->ctype, UPB_CTYPE_DOUBLE);
+}
+
+UPB_INLINE upb_value upb_value_float(float cval) {
+  upb_value ret;
+  upb_value_setfloat(&ret, cval);
+  return ret;
+}
+
+UPB_INLINE upb_value upb_value_double(double cval) {
+  upb_value ret;
+  upb_value_setdouble(&ret, cval);
+  return ret;
+}
+
 #undef SET_TYPE
 
 
@@ -1122,6 +1204,13 @@ size_t upb_inttable_count(const upb_inttable *t);
 UPB_INLINE size_t upb_strtable_count(const upb_strtable *t) {
   return t->t.count;
 }
+
+void upb_inttable_packedsize(const upb_inttable *t, size_t *size);
+void upb_strtable_packedsize(const upb_strtable *t, size_t *size);
+upb_inttable *upb_inttable_pack(const upb_inttable *t, void *p, size_t *ofs,
+                                size_t size);
+upb_strtable *upb_strtable_pack(const upb_strtable *t, void *p, size_t *ofs,
+                                size_t size);
 
 /* Inserts the given key into the hashtable with the given value.  The key must
  * not already exist in the hash table.  For string tables, the key must be
@@ -1669,6 +1758,7 @@ class FieldDef;
 class FileDef;
 class MessageDef;
 class OneofDef;
+class SymbolTable;
 }
 #endif
 
@@ -1677,6 +1767,8 @@ UPB_DECLARE_DERIVED_TYPE(upb::OneofDef, upb::RefCounted, upb_oneofdef,
                          upb_refcounted)
 UPB_DECLARE_DERIVED_TYPE(upb::FileDef, upb::RefCounted, upb_filedef,
                          upb_refcounted)
+UPB_DECLARE_TYPE(upb::SymbolTable, upb_symtab)
+
 
 /* The maximum message depth that the type graph can have.  This is a resource
  * limit for the C stack since we sometimes need to recursively traverse the
@@ -1709,8 +1801,6 @@ typedef enum {
 class upb::Def {
  public:
   typedef upb_deftype_t Type;
-
-  Def* Dup(const void *owner) const;
 
   /* upb::RefCounted methods like Ref()/Unref(). */
   UPB_REFCOUNTED_CPPMETHODS
@@ -1756,9 +1846,6 @@ class upb::Def {
 #endif  /* __cplusplus */
 
 UPB_BEGIN_EXTERN_C
-
-/* Native C API. */
-upb_def *upb_def_dup(const upb_def *def, const void *owner);
 
 /* Include upb_refcounted methods like upb_def_ref()/upb_def_unref(). */
 UPB_REFCOUNTED_CMETHODS(upb_def, upb_def_upcast)
@@ -1856,15 +1943,19 @@ UPB_DECLARE_DEF_TYPE(upb::EnumDef, enumdef, ENUM)
  * types defined in descriptor.proto, which gives INT32 and SINT32 separate
  * types (we distinguish the two with the "integer encoding" enum below). */
 typedef enum {
-  UPB_TYPE_FLOAT    = 1,
-  UPB_TYPE_DOUBLE   = 2,
-  UPB_TYPE_BOOL     = 3,
-  UPB_TYPE_STRING   = 4,
-  UPB_TYPE_BYTES    = 5,
-  UPB_TYPE_MESSAGE  = 6,
-  UPB_TYPE_ENUM     = 7,  /* Enum values are int32. */
-  UPB_TYPE_INT32    = 8,
-  UPB_TYPE_UINT32   = 9,
+  /* Types stored in 1 byte. */
+  UPB_TYPE_BOOL     = 1,
+  /* Types stored in 4 bytes. */
+  UPB_TYPE_FLOAT    = 2,
+  UPB_TYPE_INT32    = 3,
+  UPB_TYPE_UINT32   = 4,
+  UPB_TYPE_ENUM     = 5,  /* Enum values are int32. */
+  /* Types stored as pointers (probably 4 or 8 bytes). */
+  UPB_TYPE_STRING   = 6,
+  UPB_TYPE_BYTES    = 7,
+  UPB_TYPE_MESSAGE  = 8,
+  /* Types stored as 8 bytes. */
+  UPB_TYPE_DOUBLE   = 9,
   UPB_TYPE_INT64    = 10,
   UPB_TYPE_UINT64   = 11
 } upb_fieldtype_t;
@@ -1911,6 +2002,9 @@ typedef enum {
   UPB_SYNTAX_PROTO3 = 3
 } upb_syntax_t;
 
+/* Maps descriptor type -> upb field type.  */
+extern const uint8_t upb_desctype_to_fieldtype[];
+
 /* Maximum field number allowed for FieldDefs.  This is an inherent limit of the
  * protobuf wire format. */
 #define UPB_MAX_FIELDNUMBER ((1 << 29) - 1)
@@ -1944,13 +2038,6 @@ class upb::FieldDef {
 
   /* Returns NULL if memory allocation failed. */
   static reffed_ptr<FieldDef> New();
-
-  /* Duplicates the given field, returning NULL if memory allocation failed.
-   * When a fielddef is duplicated, the subdef (if any) is made symbolic if it
-   * wasn't already.  If the subdef is set but has no name (which is possible
-   * since msgdefs are not required to have a name) the new fielddef's subdef
-   * will be unset. */
-  FieldDef* Dup(const void* owner) const;
 
   /* upb::RefCounted methods like Ref()/Unref(). */
   UPB_REFCOUNTED_CPPMETHODS
@@ -2038,16 +2125,10 @@ class upb::FieldDef {
   bool IsPrimitive() const;
   bool IsMap() const;
 
-  /* Whether this field must be able to explicitly represent presence:
+  /* Returns whether this field explicitly represents presence.
    *
-   * * This is always false for repeated fields (an empty repeated field is
-   *   equivalent to a repeated field with zero entries).
-   *
-   * * This is always true for submessages.
-   *
-   * * For other fields, it depends on the message (see
-   *   MessageDef::SetPrimitivesHavePresence())
-   */
+   * For proto2 messages: Returns true for any scalar (non-repeated) field.
+   * For proto3 messages: Returns true for scalar submessage or oneof fields. */
   bool HasPresence() const;
 
   /* How integers are encoded.  Only meaningful for integer types.
@@ -2206,7 +2287,6 @@ UPB_BEGIN_EXTERN_C
 
 /* Native C API. */
 upb_fielddef *upb_fielddef_new(const void *owner);
-upb_fielddef *upb_fielddef_dup(const upb_fielddef *f, const void *owner);
 
 /* Include upb_refcounted methods like upb_fielddef_ref(). */
 UPB_REFCOUNTED_CMETHODS(upb_fielddef, upb_fielddef_upcast2)
@@ -2416,16 +2496,6 @@ class upb::MessageDef {
     return FindOneofByName(str.c_str(), str.size());
   }
 
-  /* Returns a new msgdef that is a copy of the given msgdef (and a copy of all
-   * the fields) but with any references to submessages broken and replaced
-   * with just the name of the submessage.  Returns NULL if memory allocation
-   * failed.
-   *
-   * TODO(haberman): which is more useful, keeping fields resolved or
-   * unresolving them?  If there's no obvious answer, Should this functionality
-   * just be moved into symtab.c? */
-  MessageDef* Dup(const void* owner) const;
-
   /* Is this message a map entry? */
   void setmapentry(bool map_entry);
   bool mapentry() const;
@@ -2559,7 +2629,6 @@ UPB_REFCOUNTED_CMETHODS(upb_msgdef, upb_msgdef_upcast2)
 
 bool upb_msgdef_freeze(upb_msgdef *m, upb_status *status);
 
-upb_msgdef *upb_msgdef_dup(const upb_msgdef *m, const void *owner);
 const char *upb_msgdef_fullname(const upb_msgdef *m);
 const char *upb_msgdef_name(const upb_msgdef *m);
 int upb_msgdef_numoneofs(const upb_msgdef *m);
@@ -2709,10 +2778,6 @@ class upb::EnumDef {
    * first one that was added. */
   const char* FindValueByNumber(int32_t num) const;
 
-  /* Returns a new EnumDef with all the same values.  The new EnumDef will be
-   * owned by the given owner. */
-  EnumDef* Dup(const void* owner) const;
-
   /* Iteration over name/value pairs.  The order is undefined.
    * Adding an enum val invalidates any iterators.
    *
@@ -2740,7 +2805,6 @@ UPB_BEGIN_EXTERN_C
 
 /* Native C API. */
 upb_enumdef *upb_enumdef_new(const void *owner);
-upb_enumdef *upb_enumdef_dup(const upb_enumdef *e, const void *owner);
 
 /* Include upb_refcounted methods like upb_enumdef_ref(). */
 UPB_REFCOUNTED_CMETHODS(upb_enumdef, upb_enumdef_upcast2)
@@ -2784,6 +2848,7 @@ const char *upb_enum_iter_name(upb_enum_iter *iter);
 int32_t upb_enum_iter_number(upb_enum_iter *iter);
 
 UPB_END_EXTERN_C
+
 
 /* upb::OneofDef **************************************************************/
 
@@ -2849,10 +2914,6 @@ class upb::OneofDef {
   /* Looks up by tag number. */
   const FieldDef* FindFieldByNumber(uint32_t num) const;
 
-  /* Returns a new OneofDef with all the same fields. The OneofDef will be owned
-   * by the given owner. */
-  OneofDef* Dup(const void* owner) const;
-
   /* Iteration over fields.  The order is undefined. */
   class iterator : public std::iterator<std::forward_iterator_tag, FieldDef*> {
    public:
@@ -2898,16 +2959,16 @@ UPB_BEGIN_EXTERN_C
 
 /* Native C API. */
 upb_oneofdef *upb_oneofdef_new(const void *owner);
-upb_oneofdef *upb_oneofdef_dup(const upb_oneofdef *o, const void *owner);
 
 /* Include upb_refcounted methods like upb_oneofdef_ref(). */
 UPB_REFCOUNTED_CMETHODS(upb_oneofdef, upb_oneofdef_upcast)
 
 const char *upb_oneofdef_name(const upb_oneofdef *o);
-bool upb_oneofdef_setname(upb_oneofdef *o, const char *name, upb_status *s);
-
 const upb_msgdef *upb_oneofdef_containingtype(const upb_oneofdef *o);
 int upb_oneofdef_numfields(const upb_oneofdef *o);
+uint32_t upb_oneofdef_index(const upb_oneofdef *o);
+
+bool upb_oneofdef_setname(upb_oneofdef *o, const char *name, upb_status *s);
 bool upb_oneofdef_addfield(upb_oneofdef *o, upb_fielddef *f,
                            const void *ref_donor,
                            upb_status *s);
@@ -2963,6 +3024,17 @@ class upb::FileDef {
   const char* package() const;
   bool set_package(const char* package, Status* s);
 
+  /* Sets the php class prefix which is prepended to all php generated classes
+   * from this .proto. Default is empty. */
+  const char* phpprefix() const;
+  bool set_phpprefix(const char* phpprefix, Status* s);
+
+  /* Use this option to change the namespace of php generated classes. Default
+   * is empty. When this option is empty, the package name will be used for
+   * determining the namespace. */
+  const char* phpnamespace() const;
+  bool set_phpnamespace(const char* phpnamespace, Status* s);
+
   /* Syntax for the file.  Defaults to proto2. */
   upb_syntax_t syntax() const;
   void set_syntax(upb_syntax_t syntax);
@@ -3016,6 +3088,8 @@ UPB_REFCOUNTED_CMETHODS(upb_filedef, upb_filedef_upcast)
 
 const char *upb_filedef_name(const upb_filedef *f);
 const char *upb_filedef_package(const upb_filedef *f);
+const char *upb_filedef_phpprefix(const upb_filedef *f);
+const char *upb_filedef_phpnamespace(const upb_filedef *f);
 upb_syntax_t upb_filedef_syntax(const upb_filedef *f);
 size_t upb_filedef_defcount(const upb_filedef *f);
 size_t upb_filedef_depcount(const upb_filedef *f);
@@ -3025,6 +3099,10 @@ const upb_filedef *upb_filedef_dep(const upb_filedef *f, size_t i);
 bool upb_filedef_freeze(upb_filedef *f, upb_status *s);
 bool upb_filedef_setname(upb_filedef *f, const char *name, upb_status *s);
 bool upb_filedef_setpackage(upb_filedef *f, const char *package, upb_status *s);
+bool upb_filedef_setphpprefix(upb_filedef *f, const char *phpprefix,
+                              upb_status *s);
+bool upb_filedef_setphpnamespace(upb_filedef *f, const char *phpnamespace,
+                                 upb_status *s);
 bool upb_filedef_setsyntax(upb_filedef *f, upb_syntax_t syntax, upb_status *s);
 
 bool upb_filedef_adddef(upb_filedef *f, upb_def *def, const void *ref_donor,
@@ -3051,6 +3129,153 @@ UPB_INLINE upb_def *upb_filedef_mutabledef(upb_filedef *f, int i) {
 
 UPB_END_EXTERN_C
 
+typedef struct {
+ UPB_PRIVATE_FOR_CPP
+  upb_strtable_iter iter;
+  upb_deftype_t type;
+} upb_symtab_iter;
+
+#ifdef __cplusplus
+
+/* Non-const methods in upb::SymbolTable are NOT thread-safe. */
+class upb::SymbolTable {
+ public:
+  /* Returns a new symbol table with a single ref owned by "owner."
+   * Returns NULL if memory allocation failed. */
+  static SymbolTable* New();
+  static void Free(upb::SymbolTable* table);
+
+  /* For all lookup functions, the returned pointer is not owned by the
+   * caller; it may be invalidated by any non-const call or unref of the
+   * SymbolTable!  To protect against this, take a ref if desired. */
+
+  /* Freezes the symbol table: prevents further modification of it.
+   * After the Freeze() operation is successful, the SymbolTable must only be
+   * accessed via a const pointer.
+   *
+   * Unlike with upb::MessageDef/upb::EnumDef/etc, freezing a SymbolTable is not
+   * a necessary step in using a SymbolTable.  If you have no need for it to be
+   * immutable, there is no need to freeze it ever.  However sometimes it is
+   * useful, and SymbolTables that are statically compiled into the binary are
+   * always frozen by nature. */
+  void Freeze();
+
+  /* Resolves the given symbol using the rules described in descriptor.proto,
+   * namely:
+   *
+   *    If the name starts with a '.', it is fully-qualified.  Otherwise,
+   *    C++-like scoping rules are used to find the type (i.e. first the nested
+   *    types within this message are searched, then within the parent, on up
+   *    to the root namespace).
+   *
+   * If not found, returns NULL. */
+  const Def* Resolve(const char* base, const char* sym) const;
+
+  /* Finds an entry in the symbol table with this exact name.  If not found,
+   * returns NULL. */
+  const Def* Lookup(const char *sym) const;
+  const MessageDef* LookupMessage(const char *sym) const;
+  const EnumDef* LookupEnum(const char *sym) const;
+
+  /* TODO: introduce a C++ iterator, but make it nice and templated so that if
+   * you ask for an iterator of MessageDef the iterated elements are strongly
+   * typed as MessageDef*. */
+
+  /* Adds the given mutable defs to the symtab, resolving all symbols (including
+   * enum default values) and finalizing the defs.  Only one def per name may be
+   * in the list, and the defs may not duplicate any name already in the symtab.
+   * All defs must have a name -- anonymous defs are not allowed.  Anonymous
+   * defs can still be frozen by calling upb_def_freeze() directly.
+   *
+   * The entire operation either succeeds or fails.  If the operation fails,
+   * the symtab is unchanged, false is returned, and status indicates the
+   * error.  The caller passes a ref on all defs to the symtab (even if the
+   * operation fails).
+   *
+   * TODO(haberman): currently failure will leave the symtab unchanged, but may
+   * leave the defs themselves partially resolved.  Does this matter?  If so we
+   * could do a prepass that ensures that all symbols are resolvable and bail
+   * if not, so we don't mutate anything until we know the operation will
+   * succeed. */
+  bool Add(Def*const* defs, size_t n, void* ref_donor, Status* status);
+
+  bool Add(const std::vector<Def*>& defs, void *owner, Status* status) {
+    return Add((Def*const*)&defs[0], defs.size(), owner, status);
+  }
+
+  /* Resolves all subdefs for messages in this file and attempts to freeze the
+   * file.  If this succeeds, adds all the symbols to this SymbolTable
+   * (replacing any existing ones with the same names). */
+  bool AddFile(FileDef* file, Status* s);
+
+ private:
+  UPB_DISALLOW_POD_OPS(SymbolTable, upb::SymbolTable)
+};
+
+#endif  /* __cplusplus */
+
+UPB_BEGIN_EXTERN_C
+
+/* Native C API. */
+
+upb_symtab *upb_symtab_new();
+void upb_symtab_free(upb_symtab* s);
+const upb_def *upb_symtab_resolve(const upb_symtab *s, const char *base,
+                                  const char *sym);
+const upb_def *upb_symtab_lookup(const upb_symtab *s, const char *sym);
+const upb_msgdef *upb_symtab_lookupmsg(const upb_symtab *s, const char *sym);
+const upb_enumdef *upb_symtab_lookupenum(const upb_symtab *s, const char *sym);
+bool upb_symtab_add(upb_symtab *s, upb_def *const*defs, size_t n,
+                    void *ref_donor, upb_status *status);
+bool upb_symtab_addfile(upb_symtab *s, upb_filedef *file, upb_status* status);
+
+/* upb_symtab_iter i;
+ * for(upb_symtab_begin(&i, s, type); !upb_symtab_done(&i);
+ *     upb_symtab_next(&i)) {
+ *   const upb_def *def = upb_symtab_iter_def(&i);
+ *    // ...
+ * }
+ *
+ * For C we don't have separate iterators for const and non-const.
+ * It is the caller's responsibility to cast the upb_fielddef* to
+ * const if the upb_msgdef* is const. */
+void upb_symtab_begin(upb_symtab_iter *iter, const upb_symtab *s,
+                      upb_deftype_t type);
+void upb_symtab_next(upb_symtab_iter *iter);
+bool upb_symtab_done(const upb_symtab_iter *iter);
+const upb_def *upb_symtab_iter_def(const upb_symtab_iter *iter);
+
+UPB_END_EXTERN_C
+
+#ifdef __cplusplus
+/* C++ inline wrappers. */
+namespace upb {
+inline SymbolTable* SymbolTable::New() {
+  return upb_symtab_new();
+}
+inline void SymbolTable::Free(SymbolTable* s) {
+  upb_symtab_free(s);
+}
+inline const Def *SymbolTable::Resolve(const char *base,
+                                       const char *sym) const {
+  return upb_symtab_resolve(this, base, sym);
+}
+inline const Def* SymbolTable::Lookup(const char *sym) const {
+  return upb_symtab_lookup(this, sym);
+}
+inline const MessageDef *SymbolTable::LookupMessage(const char *sym) const {
+  return upb_symtab_lookupmsg(this, sym);
+}
+inline bool SymbolTable::Add(
+    Def*const* defs, size_t n, void* ref_donor, Status* status) {
+  return upb_symtab_add(this, (upb_def*const*)defs, n, ref_donor, status);
+}
+inline bool SymbolTable::AddFile(FileDef* file, Status* s) {
+  return upb_symtab_addfile(this, file, s);
+}
+}  /* namespace upb */
+#endif
+
 #ifdef __cplusplus
 
 UPB_INLINE const char* upb_safecstr(const std::string& str) {
@@ -3061,9 +3286,6 @@ UPB_INLINE const char* upb_safecstr(const std::string& str) {
 /* Inline C++ wrappers. */
 namespace upb {
 
-inline Def* Def::Dup(const void* owner) const {
-  return upb_def_dup(this, owner);
-}
 inline Def::Type Def::def_type() const { return upb_def_type(this); }
 inline const char* Def::full_name() const { return upb_def_fullname(this); }
 inline const char* Def::name() const { return upb_def_name(this); }
@@ -3112,9 +3334,6 @@ inline FieldDef::IntegerFormat FieldDef::ConvertIntegerFormat(int32_t val) {
 inline reffed_ptr<FieldDef> FieldDef::New() {
   upb_fielddef *f = upb_fielddef_new(&f);
   return reffed_ptr<FieldDef>(f, &f);
-}
-inline FieldDef* FieldDef::Dup(const void* owner) const {
-  return upb_fielddef_dup(this, owner);
 }
 inline const char* FieldDef::full_name() const {
   return upb_fielddef_fullname(this);
@@ -3355,9 +3574,6 @@ inline const OneofDef* MessageDef::FindOneofByName(const char* name,
                                                    size_t len) const {
   return upb_msgdef_ntoo(this, name, len);
 }
-inline MessageDef* MessageDef::Dup(const void *owner) const {
-  return upb_msgdef_dup(this, owner);
-}
 inline void MessageDef::setmapentry(bool map_entry) {
   upb_msgdef_setmapentry(this, map_entry);
 }
@@ -3527,9 +3743,6 @@ inline bool EnumDef::FindValueByName(const char* name, int32_t *num) const {
 inline const char* EnumDef::FindValueByNumber(int32_t num) const {
   return upb_enumdef_iton(this, num);
 }
-inline EnumDef* EnumDef::Dup(const void* owner) const {
-  return upb_enumdef_dup(this, owner);
-}
 
 inline EnumDef::Iterator::Iterator(const EnumDef* e) {
   upb_enum_begin(&iter_, e);
@@ -3648,6 +3861,18 @@ inline const char* FileDef::package() const {
 inline bool FileDef::set_package(const char* package, Status* s) {
   return upb_filedef_setpackage(this, package, s);
 }
+inline const char* FileDef::phpprefix() const {
+  return upb_filedef_phpprefix(this);
+}
+inline bool FileDef::set_phpprefix(const char* phpprefix, Status* s) {
+  return upb_filedef_setphpprefix(this, phpprefix, s);
+}
+inline const char* FileDef::phpnamespace() const {
+  return upb_filedef_phpnamespace(this);
+}
+inline bool FileDef::set_phpnamespace(const char* phpnamespace, Status* s) {
+  return upb_filedef_setphpnamespace(this, phpnamespace, s);
+}
 inline int FileDef::def_count() const {
   return upb_filedef_defcount(this);
 }
@@ -3683,193 +3908,6 @@ inline bool FileDef::AddDependency(const FileDef* file) {
 #endif
 
 #endif /* UPB_DEF_H_ */
-/*
-** This file contains definitions of structs that should be considered private
-** and NOT stable across versions of upb.
-**
-** The only reason they are declared here and not in .c files is to allow upb
-** and the application (if desired) to embed statically-initialized instances
-** of structures like defs.
-**
-** If you include this file, all guarantees of ABI compatibility go out the
-** window!  Any code that includes this file needs to recompile against the
-** exact same version of upb that they are linking against.
-**
-** You also need to recompile if you change the value of the UPB_DEBUG_REFS
-** flag.
-*/
-
-
-#ifndef UPB_STATICINIT_H_
-#define UPB_STATICINIT_H_
-
-#ifdef __cplusplus
-/* Because of how we do our typedefs, this header can't be included from C++. */
-#error This file cannot be included from C++
-#endif
-
-/* upb_refcounted *************************************************************/
-
-
-/* upb_def ********************************************************************/
-
-struct upb_def {
-  upb_refcounted base;
-
-  const char *fullname;
-  const upb_filedef* file;
-  char type;  /* A upb_deftype_t (char to save space) */
-
-  /* Used as a flag during the def's mutable stage.  Must be false unless
-   * it is currently being used by a function on the stack.  This allows
-   * us to easily determine which defs were passed into the function's
-   * current invocation. */
-  bool came_from_user;
-};
-
-#define UPB_DEF_INIT(name, type, vtbl, refs, ref2s) \
-    { UPB_REFCOUNT_INIT(vtbl, refs, ref2s), name, NULL, type, false }
-
-
-/* upb_fielddef ***************************************************************/
-
-struct upb_fielddef {
-  upb_def base;
-
-  union {
-    int64_t sint;
-    uint64_t uint;
-    double dbl;
-    float flt;
-    void *bytes;
-  } defaultval;
-  union {
-    const upb_msgdef *def;  /* If !msg_is_symbolic. */
-    char *name;             /* If msg_is_symbolic. */
-  } msg;
-  union {
-    const upb_def *def;  /* If !subdef_is_symbolic. */
-    char *name;          /* If subdef_is_symbolic. */
-  } sub;  /* The msgdef or enumdef for this field, if upb_hassubdef(f). */
-  bool subdef_is_symbolic;
-  bool msg_is_symbolic;
-  const upb_oneofdef *oneof;
-  bool default_is_string;
-  bool type_is_set_;     /* False until type is explicitly set. */
-  bool is_extension_;
-  bool lazy_;
-  bool packed_;
-  upb_intfmt_t intfmt;
-  bool tagdelim;
-  upb_fieldtype_t type_;
-  upb_label_t label_;
-  uint32_t number_;
-  uint32_t selector_base;  /* Used to index into a upb::Handlers table. */
-  uint32_t index_;
-};
-
-extern const struct upb_refcounted_vtbl upb_fielddef_vtbl;
-
-#define UPB_FIELDDEF_INIT(label, type, intfmt, tagdelim, is_extension, lazy,   \
-                          packed, name, num, msgdef, subdef, selector_base,    \
-                          index, defaultval, refs, ref2s)                      \
-  {                                                                            \
-    UPB_DEF_INIT(name, UPB_DEF_FIELD, &upb_fielddef_vtbl, refs, ref2s),        \
-        defaultval, {msgdef}, {subdef}, NULL, false, false,                    \
-        type == UPB_TYPE_STRING || type == UPB_TYPE_BYTES, true, is_extension, \
-        lazy, packed, intfmt, tagdelim, type, label, num, selector_base, index \
-  }
-
-
-/* upb_msgdef *****************************************************************/
-
-struct upb_msgdef {
-  upb_def base;
-
-  size_t selector_count;
-  uint32_t submsg_field_count;
-
-  /* Tables for looking up fields by number and name. */
-  upb_inttable itof;  /* int to field */
-  upb_strtable ntof;  /* name to field/oneof */
-
-  /* Is this a map-entry message? */
-  bool map_entry;
-
-  /* Whether this message has proto2 or proto3 semantics. */
-  upb_syntax_t syntax;
-
-  /* TODO(haberman): proper extension ranges (there can be multiple). */
-};
-
-extern const struct upb_refcounted_vtbl upb_msgdef_vtbl;
-
-/* TODO: also support static initialization of the oneofs table. This will be
- * needed if we compile in descriptors that contain oneofs. */
-#define UPB_MSGDEF_INIT(name, selector_count, submsg_field_count, itof, ntof, \
-                        map_entry, syntax, refs, ref2s)                       \
-  {                                                                           \
-    UPB_DEF_INIT(name, UPB_DEF_MSG, &upb_fielddef_vtbl, refs, ref2s),         \
-        selector_count, submsg_field_count, itof, ntof, map_entry, syntax     \
-  }
-
-
-/* upb_enumdef ****************************************************************/
-
-struct upb_enumdef {
-  upb_def base;
-
-  upb_strtable ntoi;
-  upb_inttable iton;
-  int32_t defaultval;
-};
-
-extern const struct upb_refcounted_vtbl upb_enumdef_vtbl;
-
-#define UPB_ENUMDEF_INIT(name, ntoi, iton, defaultval, refs, ref2s) \
-  { UPB_DEF_INIT(name, UPB_DEF_ENUM, &upb_enumdef_vtbl, refs, ref2s), ntoi,    \
-    iton, defaultval }
-
-
-/* upb_oneofdef ***************************************************************/
-
-struct upb_oneofdef {
-  upb_refcounted base;
-
-  const char *name;
-  upb_strtable ntof;
-  upb_inttable itof;
-  const upb_msgdef *parent;
-};
-
-extern const struct upb_refcounted_vtbl upb_oneofdef_vtbl;
-
-#define UPB_ONEOFDEF_INIT(name, ntof, itof, refs, ref2s) \
-  { UPB_REFCOUNT_INIT(&upb_oneofdef_vtbl, refs, ref2s), name, ntof, itof }
-
-
-/* upb_symtab *****************************************************************/
-
-struct upb_symtab {
-  upb_refcounted base;
-
-  upb_strtable symtab;
-};
-
-struct upb_filedef {
-  upb_refcounted base;
-
-  const char *name;
-  const char *package;
-  upb_syntax_t syntax;
-
-  upb_inttable defs;
-  upb_inttable deps;
-};
-
-extern const struct upb_refcounted_vtbl upb_filedef_vtbl;
-
-#endif  /* UPB_STATICINIT_H_ */
 /*
 ** upb::Handlers (upb_handlers)
 **
@@ -3974,7 +4012,8 @@ UPB_END_EXTERN_C
 /* Static selectors for upb::Handlers. */
 #define UPB_STARTMSG_SELECTOR 0
 #define UPB_ENDMSG_SELECTOR 1
-#define UPB_STATIC_SELECTOR_COUNT 2
+#define UPB_UNKNOWN_SELECTOR 2
+#define UPB_STATIC_SELECTOR_COUNT 3
 
 /* Static selectors for upb::BytesHandler. */
 #define UPB_STARTSTR_SELECTOR 0
@@ -4503,6 +4542,8 @@ UPB_BEGIN_EXTERN_C
 /* Native C API. */
 
 /* Handler function typedefs. */
+typedef bool upb_unknown_handlerfunc(void *c, const void *hd, const char *buf,
+                                     size_t n);
 typedef bool upb_startmsg_handlerfunc(void *c, const void*);
 typedef bool upb_endmsg_handlerfunc(void *c, const void *, upb_status *status);
 typedef void* upb_startfield_handlerfunc(void *c, const void *hd);
@@ -4556,6 +4597,8 @@ const upb_status *upb_handlers_status(upb_handlers *h);
 void upb_handlers_clearerr(upb_handlers *h);
 const upb_msgdef *upb_handlers_msgdef(const upb_handlers *h);
 bool upb_handlers_addcleanup(upb_handlers *h, void *p, upb_handlerfree *hfree);
+bool upb_handlers_setunknown(upb_handlers *h, upb_unknown_handlerfunc *func,
+                             upb_handlerattr *attr);
 
 bool upb_handlers_setstartmsg(upb_handlers *h, upb_startmsg_handlerfunc *func,
                               upb_handlerattr *attr);
@@ -5832,12 +5875,14 @@ inline BytesHandler::~BytesHandler() {}
 
 #ifdef __cplusplus
 namespace upb {
+class BufferSink;
 class BufferSource;
 class BytesSink;
 class Sink;
 }
 #endif
 
+UPB_DECLARE_TYPE(upb::BufferSink, upb_bufsink)
 UPB_DECLARE_TYPE(upb::BufferSource, upb_bufsrc)
 UPB_DECLARE_TYPE(upb::BytesSink, upb_bytessink)
 UPB_DECLARE_TYPE(upb::Sink, upb_sink)
@@ -6024,6 +6069,13 @@ struct upb_bufsrc {
 
 UPB_BEGIN_EXTERN_C
 
+/* A class for accumulating output string data in a flat buffer. */
+
+upb_bufsink *upb_bufsink_new(upb_env *env);
+void upb_bufsink_free(upb_bufsink *sink);
+upb_bytessink *upb_bufsink_sink(upb_bufsink *sink);
+const char *upb_bufsink_getdata(const upb_bufsink *sink, size_t *len);
+
 /* Inline definitions. */
 
 UPB_INLINE void upb_bytessink_reset(upb_bytessink *s, const upb_byteshandler *h,
@@ -6073,23 +6125,7 @@ UPB_INLINE bool upb_bytessink_end(upb_bytessink *s) {
                  &s->handler->table[UPB_ENDSTR_SELECTOR].attr));
 }
 
-UPB_INLINE bool upb_bufsrc_putbuf(const char *buf, size_t len,
-                                  upb_bytessink *sink) {
-  void *subc;
-  bool ret;
-  upb_bufhandle handle;
-  upb_bufhandle_init(&handle);
-  upb_bufhandle_setbuf(&handle, buf, 0);
-  ret = upb_bytessink_start(sink, len, &subc);
-  if (ret && len != 0) {
-    ret = (upb_bytessink_putbuf(sink, subc, buf, len, &handle) >= len);
-  }
-  if (ret) {
-    ret = upb_bytessink_end(sink);
-  }
-  upb_bufhandle_uninit(&handle);
-  return ret;
-}
+bool upb_bufsrc_putbuf(const char *buf, size_t len, upb_bytessink *sink);
 
 #define PUTVAL(type, ctype)                                                    \
   UPB_INLINE bool upb_sink_put##type(upb_sink *s, upb_selector_t sel,          \
@@ -6130,6 +6166,18 @@ UPB_INLINE size_t upb_sink_putstring(upb_sink *s, upb_selector_t sel,
   if (!handler) return n;
   hd = upb_handlers_gethandlerdata(s->handlers, sel);
   return handler(s->closure, hd, buf, n, handle);
+}
+
+UPB_INLINE bool upb_sink_putunknown(upb_sink *s, const char *buf, size_t n) {
+  typedef upb_unknown_handlerfunc func;
+  func *handler;
+  const void *hd;
+  if (!s->handlers) return true;
+  handler = (func *)upb_handlers_gethandler(s->handlers, UPB_UNKNOWN_SELECTOR);
+
+  if (!handler) return n;
+  hd = upb_handlers_gethandlerdata(s->handlers, UPB_UNKNOWN_SELECTOR);
+  return handler(s->closure, hd, buf, n);
 }
 
 UPB_INLINE bool upb_sink_startmsg(upb_sink *s) {
@@ -6336,268 +6384,1334 @@ inline bool BufferSource::PutBuffer(const char *buf, size_t len,
 #endif
 
 #endif
-/*
-** For handlers that do very tiny, very simple operations, the function call
-** overhead of calling a handler can be significant.  This file allows the
-** user to define handlers that do something very simple like store the value
-** to memory and/or set a hasbit.  JIT compilers can then special-case these
-** handlers and emit specialized code for them instead of actually calling the
-** handler.
-**
-** The functionality is very simple/limited right now but may expand to be able
-** to call another function.
-*/
-
-#ifndef UPB_SHIM_H
-#define UPB_SHIM_H
-
-
-typedef struct {
-  size_t offset;
-  int32_t hasbit;
-} upb_shim_data;
 
 #ifdef __cplusplus
 
 namespace upb {
-
-struct Shim {
-  typedef upb_shim_data Data;
-
-  /* Sets a handler for the given field that writes the value to the given
-   * offset and, if hasbit >= 0, sets a bit at the given bit offset.  Returns
-   * true if the handler was set successfully. */
-  static bool Set(Handlers *h, const FieldDef *f, size_t ofs, int32_t hasbit);
-
-  /* If this handler is a shim, returns the corresponding upb::Shim::Data and
-   * stores the type in "type".  Otherwise returns NULL. */
-  static const Data* GetData(const Handlers* h, Handlers::Selector s,
-                             FieldDef::Type* type);
-};
-
-}  /* namespace upb */
+class Array;
+class Map;
+class MapIterator;
+class MessageFactory;
+class MessageLayout;
+class Visitor;
+class VisitorPlan;
+}
 
 #endif
+
+UPB_DECLARE_TYPE(upb::MessageFactory, upb_msgfactory)
+UPB_DECLARE_TYPE(upb::MessageLayout, upb_msglayout)
+UPB_DECLARE_TYPE(upb::Array, upb_array)
+UPB_DECLARE_TYPE(upb::Map, upb_map)
+UPB_DECLARE_TYPE(upb::MapIterator, upb_mapiter)
+UPB_DECLARE_TYPE(upb::Visitor, upb_visitor)
+UPB_DECLARE_TYPE(upb::VisitorPlan, upb_visitorplan)
+
+/* TODO(haberman): C++ accessors */
 
 UPB_BEGIN_EXTERN_C
 
-/* C API. */
-bool upb_shim_set(upb_handlers *h, const upb_fielddef *f, size_t offset,
-                  int32_t hasbit);
-const upb_shim_data *upb_shim_getdata(const upb_handlers *h, upb_selector_t s,
-                                      upb_fieldtype_t *type);
-
-UPB_END_EXTERN_C
-
-#ifdef __cplusplus
-/* C++ Wrappers. */
-namespace upb {
-inline bool Shim::Set(Handlers* h, const FieldDef* f, size_t ofs,
-                      int32_t hasbit) {
-  return upb_shim_set(h, f, ofs, hasbit);
-}
-inline const Shim::Data* Shim::GetData(const Handlers* h, Handlers::Selector s,
-                                       FieldDef::Type* type) {
-  return upb_shim_getdata(h, s, type);
-}
-}  /* namespace upb */
-#endif
-
-#endif  /* UPB_SHIM_H */
-/*
-** upb::SymbolTable (upb_symtab)
-**
-** A symtab (symbol table) stores a name->def map of upb_defs.  Clients could
-** always create such tables themselves, but upb_symtab has logic for resolving
-** symbolic references, and in particular, for keeping a whole set of consistent
-** defs when replacing some subset of those defs.  This logic is nontrivial.
-**
-** This is a mixed C/C++ interface that offers a full API to both languages.
-** See the top-level README for more information.
-*/
-
-#ifndef UPB_SYMTAB_H_
-#define UPB_SYMTAB_H_
+typedef void upb_msg;
 
 
-#ifdef __cplusplus
-#include <vector>
-namespace upb { class SymbolTable; }
-#endif
+/** upb_msglayout *************************************************************/
 
-UPB_DECLARE_DERIVED_TYPE(upb::SymbolTable, upb::RefCounted,
-                         upb_symtab, upb_refcounted)
+/* upb_msglayout represents the memory layout of a given upb_msgdef.  You get
+ * instances of this from a upb_msgfactory, and the factory always owns the
+ * msglayout. */
+
+
+/** upb_visitor ***************************************************************/
+
+/* upb_visitor will visit all the fields of a message and its submessages.  It
+ * uses a upb_visitorplan which you can obtain from a upb_msgfactory. */
+
+upb_visitor *upb_visitor_create(upb_env *e, const upb_visitorplan *vp,
+                                upb_sink *output);
+bool upb_visitor_visitmsg(upb_visitor *v, const upb_msg *msg);
+
+
+/** upb_msgfactory ************************************************************/
+
+/* A upb_msgfactory contains a cache of upb_msglayout, upb_handlers, and
+ * upb_visitorplan objects.  These are the objects necessary to represent,
+ * populate, and and visit upb_msg objects.
+ *
+ * These caches are all populated by upb_msgdef, and lazily created on demand.
+ */
+
+/* Creates and destroys a msgfactory, respectively.  The messages for this
+ * msgfactory must come from |symtab| (which should outlive the msgfactory). */
+upb_msgfactory *upb_msgfactory_new(const upb_symtab *symtab);
+void upb_msgfactory_free(upb_msgfactory *f);
+
+const upb_symtab *upb_msgfactory_symtab(const upb_msgfactory *f);
+
+/* The functions to get cached objects, lazily creating them on demand.  These
+ * all require:
+ *
+ * - m is in upb_msgfactory_symtab(f)
+ * - upb_msgdef_mapentry(m) == false (since map messages can't have layouts).
+ *
+ * The returned objects will live for as long as the msgfactory does.
+ *
+ * TODO(haberman): consider making this thread-safe and take a const
+ * upb_msgfactory. */
+const upb_msglayout *upb_msgfactory_getlayout(upb_msgfactory *f,
+                                              const upb_msgdef *m);
+const upb_handlers *upb_msgfactory_getmergehandlers(upb_msgfactory *f,
+                                                    const upb_msgdef *m);
+const upb_visitorplan *upb_msgfactory_getvisitorplan(upb_msgfactory *f,
+                                                     const upb_handlers *h);
+
+
+/** upb_stringview ************************************************************/
 
 typedef struct {
- UPB_PRIVATE_FOR_CPP
-  upb_strtable_iter iter;
-  upb_deftype_t type;
-} upb_symtab_iter;
+  const char *data;
+  size_t size;
+} upb_stringview;
 
-#ifdef __cplusplus
+UPB_INLINE upb_stringview upb_stringview_make(const char *data, size_t size) {
+  upb_stringview ret;
+  ret.data = data;
+  ret.size = size;
+  return ret;
+}
 
-/* Non-const methods in upb::SymbolTable are NOT thread-safe. */
-class upb::SymbolTable {
- public:
-  /* Returns a new symbol table with a single ref owned by "owner."
-   * Returns NULL if memory allocation failed. */
-  static reffed_ptr<SymbolTable> New();
+#define UPB_STRINGVIEW_INIT(ptr, len) {ptr, len}
 
-  /* Include RefCounted base methods. */
-  UPB_REFCOUNTED_CPPMETHODS
 
-  /* For all lookup functions, the returned pointer is not owned by the
-   * caller; it may be invalidated by any non-const call or unref of the
-   * SymbolTable!  To protect against this, take a ref if desired. */
+/** upb_msgval ****************************************************************/
 
-  /* Freezes the symbol table: prevents further modification of it.
-   * After the Freeze() operation is successful, the SymbolTable must only be
-   * accessed via a const pointer.
-   *
-   * Unlike with upb::MessageDef/upb::EnumDef/etc, freezing a SymbolTable is not
-   * a necessary step in using a SymbolTable.  If you have no need for it to be
-   * immutable, there is no need to freeze it ever.  However sometimes it is
-   * useful, and SymbolTables that are statically compiled into the binary are
-   * always frozen by nature. */
-  void Freeze();
+/* A union representing all possible protobuf values.  Used for generic get/set
+ * operations. */
 
-  /* Resolves the given symbol using the rules described in descriptor.proto,
-   * namely:
-   *
-   *    If the name starts with a '.', it is fully-qualified.  Otherwise,
-   *    C++-like scoping rules are used to find the type (i.e. first the nested
-   *    types within this message are searched, then within the parent, on up
-   *    to the root namespace).
-   *
-   * If not found, returns NULL. */
-  const Def* Resolve(const char* base, const char* sym) const;
+typedef union {
+  bool b;
+  float flt;
+  double dbl;
+  int32_t i32;
+  int64_t i64;
+  uint32_t u32;
+  uint64_t u64;
+  const upb_map* map;
+  const upb_msg* msg;
+  const upb_array* arr;
+  const void* ptr;
+  upb_stringview str;
+} upb_msgval;
 
-  /* Finds an entry in the symbol table with this exact name.  If not found,
-   * returns NULL. */
-  const Def* Lookup(const char *sym) const;
-  const MessageDef* LookupMessage(const char *sym) const;
-  const EnumDef* LookupEnum(const char *sym) const;
-
-  /* TODO: introduce a C++ iterator, but make it nice and templated so that if
-   * you ask for an iterator of MessageDef the iterated elements are strongly
-   * typed as MessageDef*. */
-
-  /* Adds the given mutable defs to the symtab, resolving all symbols
-   * (including enum default values) and finalizing the defs.  Only one def per
-   * name may be in the list, but defs can replace existing defs in the symtab.
-   * All defs must have a name -- anonymous defs are not allowed.  Anonymous
-   * defs can still be frozen by calling upb_def_freeze() directly.
-   *
-   * Any existing defs that can reach defs that are being replaced will
-   * themselves be replaced also, so that the resulting set of defs is fully
-   * consistent.
-   *
-   * This logic implemented in this method is a convenience; ultimately it
-   * calls some combination of upb_fielddef_setsubdef(), upb_def_dup(), and
-   * upb_freeze(), any of which the client could call themself.  However, since
-   * the logic for doing so is nontrivial, we provide it here.
-   *
-   * The entire operation either succeeds or fails.  If the operation fails,
-   * the symtab is unchanged, false is returned, and status indicates the
-   * error.  The caller passes a ref on all defs to the symtab (even if the
-   * operation fails).
-   *
-   * TODO(haberman): currently failure will leave the symtab unchanged, but may
-   * leave the defs themselves partially resolved.  Does this matter?  If so we
-   * could do a prepass that ensures that all symbols are resolvable and bail
-   * if not, so we don't mutate anything until we know the operation will
-   * succeed.
-   *
-   * TODO(haberman): since the defs must be mutable, refining a frozen def
-   * requires making mutable copies of the entire tree.  This is wasteful if
-   * only a few messages are changing.  We may want to add a way of adding a
-   * tree of frozen defs to the symtab (perhaps an alternate constructor where
-   * you pass the root of the tree?) */
-  bool Add(Def*const* defs, size_t n, void* ref_donor, Status* status);
-
-  bool Add(const std::vector<Def*>& defs, void *owner, Status* status) {
-    return Add((Def*const*)&defs[0], defs.size(), owner, status);
+#define ACCESSORS(name, membername, ctype) \
+  UPB_INLINE ctype upb_msgval_get ## name(upb_msgval v) { \
+    return v.membername; \
+  } \
+  UPB_INLINE void upb_msgval_set ## name(upb_msgval *v, ctype cval) { \
+    v->membername = cval; \
+  } \
+  UPB_INLINE upb_msgval upb_msgval_ ## name(ctype v) { \
+    upb_msgval ret; \
+    ret.membername = v; \
+    return ret; \
   }
 
-  /* Resolves all subdefs for messages in this file and attempts to freeze the
-   * file.  If this succeeds, adds all the symbols to this SymbolTable
-   * (replacing any existing ones with the same names). */
-  bool AddFile(FileDef* file, Status* s);
+ACCESSORS(bool,   b,   bool)
+ACCESSORS(float,  flt, float)
+ACCESSORS(double, dbl, double)
+ACCESSORS(int32,  i32, int32_t)
+ACCESSORS(int64,  i64, int64_t)
+ACCESSORS(uint32, u32, uint32_t)
+ACCESSORS(uint64, u64, uint64_t)
+ACCESSORS(map,    map, const upb_map*)
+ACCESSORS(msg,    msg, const upb_msg*)
+ACCESSORS(ptr,    ptr, const void*)
+ACCESSORS(arr,    arr, const upb_array*)
+ACCESSORS(str,    str, upb_stringview)
 
- private:
-  UPB_DISALLOW_POD_OPS(SymbolTable, upb::SymbolTable)
-};
+#undef ACCESSORS
 
-#endif  /* __cplusplus */
+UPB_INLINE upb_msgval upb_msgval_makestr(const char *data, size_t size) {
+  return upb_msgval_str(upb_stringview_make(data, size));
+}
 
-UPB_BEGIN_EXTERN_C
 
-/* Native C API. */
+/** upb_msg *******************************************************************/
 
-/* Include refcounted methods like upb_symtab_ref(). */
-UPB_REFCOUNTED_CMETHODS(upb_symtab, upb_symtab_upcast)
-
-upb_symtab *upb_symtab_new(const void *owner);
-void upb_symtab_freeze(upb_symtab *s);
-const upb_def *upb_symtab_resolve(const upb_symtab *s, const char *base,
-                                  const char *sym);
-const upb_def *upb_symtab_lookup(const upb_symtab *s, const char *sym);
-const upb_msgdef *upb_symtab_lookupmsg(const upb_symtab *s, const char *sym);
-const upb_enumdef *upb_symtab_lookupenum(const upb_symtab *s, const char *sym);
-bool upb_symtab_add(upb_symtab *s, upb_def *const*defs, size_t n,
-                    void *ref_donor, upb_status *status);
-bool upb_symtab_addfile(upb_symtab *s, upb_filedef *file, upb_status* status);
-
-/* upb_symtab_iter i;
- * for(upb_symtab_begin(&i, s, type); !upb_symtab_done(&i);
- *     upb_symtab_next(&i)) {
- *   const upb_def *def = upb_symtab_iter_def(&i);
- *    // ...
- * }
+/* A upb_msg represents a protobuf message.  It always corresponds to a specific
+ * upb_msglayout, which describes how it is laid out in memory.
  *
- * For C we don't have separate iterators for const and non-const.
- * It is the caller's responsibility to cast the upb_fielddef* to
- * const if the upb_msgdef* is const. */
-void upb_symtab_begin(upb_symtab_iter *iter, const upb_symtab *s,
-                      upb_deftype_t type);
-void upb_symtab_next(upb_symtab_iter *iter);
-bool upb_symtab_done(const upb_symtab_iter *iter);
-const upb_def *upb_symtab_iter_def(const upb_symtab_iter *iter);
+ * The message will have a fixed size, as returned by upb_msg_sizeof(), which
+ * will be used to store fixed-length fields.  The upb_msg may also allocate
+ * dynamic memory internally to store data such as:
+ *
+ * - extensions
+ * - unknown fields
+ */
+
+/* Returns the size of a message given this layout. */
+size_t upb_msg_sizeof(const upb_msglayout *l);
+
+/* upb_msg_init() / upb_msg_uninit() allow the user to use a pre-allocated
+ * block of memory as a message.  The block's size should be upb_msg_sizeof().
+ * upb_msg_uninit() must be called to release internally-allocated memory
+ * unless the allocator is an arena that does not require freeing.
+ *
+ * Please note that upb_msg_init() may return a value that is different than
+ * |msg|, so you must assign the return value and not cast your memory block
+ * to upb_msg* directly!
+ *
+ * Please note that upb_msg_uninit() does *not* free any submessages, maps,
+ * or arrays referred to by this message's fields.  You must free them manually
+ * yourself.
+ *
+ * upb_msg_uninit returns the original memory block, which may be useful if
+ * you dynamically allocated it (though upb_msg_new() would normally be more
+ * appropriate in this case). */
+upb_msg *upb_msg_init(void *msg, const upb_msglayout *l, upb_alloc *a);
+void *upb_msg_uninit(upb_msg *msg, const upb_msglayout *l);
+
+/* Like upb_msg_init() / upb_msg_uninit(), except the message's memory is
+ * allocated / freed from the given upb_alloc. */
+upb_msg *upb_msg_new(const upb_msglayout *l, upb_alloc *a);
+void upb_msg_free(upb_msg *msg, const upb_msglayout *l);
+
+/* Returns the upb_alloc for the given message.
+ * TODO(haberman): get rid of this?  Not sure we want to be storing this
+ * for every message. */
+upb_alloc *upb_msg_alloc(const upb_msg *msg);
+
+/* Packs the tree of messages rooted at "msg" into a single hunk of memory,
+ * allocated from the given allocator. */
+void *upb_msg_pack(const upb_msg *msg, const upb_msglayout *l,
+                   void *p, size_t *ofs, size_t size);
+
+/* Read-only message API.  Can be safely called by anyone. */
+
+/* Returns the value associated with this field:
+ *   - for scalar fields (including strings), the value directly.
+ *   - return upb_msg*, or upb_map* for msg/map.
+ *     If the field is unset for these field types, returns NULL.
+ *
+ * TODO(haberman): should we let users store cached array/map/msg
+ * pointers here for fields that are unset?  Could be useful for the
+ * strongly-owned submessage model (ie. generated C API that doesn't use
+ * arenas).
+ */
+upb_msgval upb_msg_get(const upb_msg *msg,
+                       int field_index,
+                       const upb_msglayout *l);
+
+/* May only be called for fields where upb_fielddef_haspresence(f) == true. */
+bool upb_msg_has(const upb_msg *msg,
+                 int field_index,
+                 const upb_msglayout *l);
+
+/* Mutable message API.  May only be called by the owner of the message who
+ * knows its ownership scheme and how to keep it consistent. */
+
+/* Sets the given field to the given value.  Does not perform any memory
+ * management: if you overwrite a pointer to a msg/array/map/string without
+ * cleaning it up (or using an arena) it will leak.
+ */
+void upb_msg_set(upb_msg *msg,
+                 int field_index,
+                 upb_msgval val,
+                 const upb_msglayout *l);
+
+/* For a primitive field, set it back to its default. For repeated, string, and
+ * submessage fields set it back to NULL.  This could involve releasing some
+ * internal memory (for example, from an extension dictionary), but it is not
+ * recursive in any way and will not recover any memory that may be used by
+ * arrays/maps/strings/msgs that this field may have pointed to.
+ */
+bool upb_msg_clearfield(upb_msg *msg,
+                        int field_index,
+                        const upb_msglayout *l);
+
+/* TODO(haberman): copyfrom()/mergefrom()? */
+
+
+/** upb_array *****************************************************************/
+
+/* A upb_array stores data for a repeated field.  The memory management
+ * semantics are the same as upb_msg.  A upb_array allocates dynamic
+ * memory internally for the array elements. */
+
+size_t upb_array_sizeof(upb_fieldtype_t type);
+void upb_array_init(upb_array *arr, upb_fieldtype_t type, upb_alloc *a);
+void upb_array_uninit(upb_array *arr);
+upb_array *upb_array_new(upb_fieldtype_t type, upb_alloc *a);
+void upb_array_free(upb_array *arr);
+
+/* Read-only interface.  Safe for anyone to call. */
+
+size_t upb_array_size(const upb_array *arr);
+upb_fieldtype_t upb_array_type(const upb_array *arr);
+upb_msgval upb_array_get(const upb_array *arr, size_t i);
+
+/* Write interface.  May only be called by the message's owner who can enforce
+ * its memory management invariants. */
+
+bool upb_array_set(upb_array *arr, size_t i, upb_msgval val);
+
+
+/** upb_map *******************************************************************/
+
+/* A upb_map stores data for a map field.  The memory management semantics are
+ * the same as upb_msg, with one notable exception.  upb_map will internally
+ * store a copy of all string keys, but *not* any string values or submessages.
+ * So you must ensure that any string or message values outlive the map, and you
+ * must delete them manually when they are no longer required. */
+
+size_t upb_map_sizeof(upb_fieldtype_t ktype, upb_fieldtype_t vtype);
+bool upb_map_init(upb_map *map, upb_fieldtype_t ktype, upb_fieldtype_t vtype,
+                  upb_alloc *a);
+void upb_map_uninit(upb_map *map);
+upb_map *upb_map_new(upb_fieldtype_t ktype, upb_fieldtype_t vtype, upb_alloc *a);
+void upb_map_free(upb_map *map);
+
+/* Read-only interface.  Safe for anyone to call. */
+
+size_t upb_map_size(const upb_map *map);
+upb_fieldtype_t upb_map_keytype(const upb_map *map);
+upb_fieldtype_t upb_map_valuetype(const upb_map *map);
+bool upb_map_get(const upb_map *map, upb_msgval key, upb_msgval *val);
+
+/* Write interface.  May only be called by the message's owner who can enforce
+ * its memory management invariants. */
+
+/* Sets or overwrites an entry in the map.  Return value indicates whether
+ * the operation succeeded or failed with OOM, and also whether an existing
+ * key was replaced or not. */
+bool upb_map_set(upb_map *map,
+                 upb_msgval key, upb_msgval val,
+                 upb_msgval *valremoved);
+
+/* Deletes an entry in the map.  Returns true if the key was present. */
+bool upb_map_del(upb_map *map, upb_msgval key);
+
+
+/** upb_mapiter ***************************************************************/
+
+/* For iterating over a map.  Map iterators are invalidated by mutations to the
+ * map, but an invalidated iterator will never return junk or crash the process.
+ * An invalidated iterator may return entries that were already returned though,
+ * and if you keep invalidating the iterator during iteration, the program may
+ * enter an infinite loop. */
+
+size_t upb_mapiter_sizeof();
+
+void upb_mapiter_begin(upb_mapiter *i, const upb_map *t);
+upb_mapiter *upb_mapiter_new(const upb_map *t, upb_alloc *a);
+void upb_mapiter_free(upb_mapiter *i, upb_alloc *a);
+void upb_mapiter_next(upb_mapiter *i);
+bool upb_mapiter_done(const upb_mapiter *i);
+
+upb_msgval upb_mapiter_key(const upb_mapiter *i);
+upb_msgval upb_mapiter_value(const upb_mapiter *i);
+void upb_mapiter_setdone(upb_mapiter *i);
+bool upb_mapiter_isequal(const upb_mapiter *i1, const upb_mapiter *i2);
+
+
+/** Handlers ******************************************************************/
+
+/* These are the handlers used internally by upb_msgfactory_getmergehandlers().
+ * They write scalar data to a known offset from the message pointer.
+ *
+ * These would be trivial for anyone to implement themselves, but it's better
+ * to use these because some JITs will recognize and specialize these instead
+ * of actually calling the function. */
+
+/* Sets a handler for the given primitive field that will write the data at the
+ * given offset.  If hasbit > 0, also sets a hasbit at the given bit offset
+ * (addressing each byte low to high). */
+bool upb_msg_setscalarhandler(upb_handlers *h,
+                              const upb_fielddef *f,
+                              size_t offset,
+                              int32_t hasbit);
+
+/* If the given handler is a msghandlers_primitive field, returns true and sets
+ * *type, *offset and *hasbit.  Otherwise returns false. */
+bool upb_msg_getscalarhandlerdata(const upb_handlers *h,
+                                  upb_selector_t s,
+                                  upb_fieldtype_t *type,
+                                  size_t *offset,
+                                  int32_t *hasbit);
+
+
+/** Interfaces for generated code *********************************************/
+
+#define UPB_NOT_IN_ONEOF UINT16_MAX
+#define UPB_NO_HASBIT UINT16_MAX
+#define UPB_NO_SUBMSG UINT16_MAX
+
+typedef struct {
+  uint32_t number;
+  uint32_t offset;  /* If in a oneof, offset of default in default_msg below. */
+  uint16_t hasbit;        /* UPB_NO_HASBIT if no hasbit. */
+  uint16_t oneof_index;   /* UPB_NOT_IN_ONEOF if not in a oneof. */
+  uint16_t submsg_index;  /* UPB_NO_SUBMSG if no submsg. */
+  uint8_t descriptortype;
+  uint8_t label;
+} upb_msglayout_fieldinit_v1;
+
+typedef struct {
+  uint32_t data_offset;
+  uint32_t case_offset;
+} upb_msglayout_oneofinit_v1;
+
+typedef struct upb_msglayout_msginit_v1 {
+  const struct upb_msglayout_msginit_v1 *const* submsgs;
+  const upb_msglayout_fieldinit_v1 *fields;
+  const upb_msglayout_oneofinit_v1 *oneofs;
+  void *default_msg;
+  /* Must be aligned to sizeof(void*).  Doesn't include internal members like
+   * unknown fields, extension dict, pointer to msglayout, etc. */
+  uint32_t size;
+  uint16_t field_count;
+  uint16_t oneof_count;
+  bool extendable;
+  bool is_proto2;
+} upb_msglayout_msginit_v1;
+
+#define UPB_ALIGN_UP_TO(val, align) ((val + (align - 1)) & -align)
+#define UPB_ALIGNED_SIZEOF(type) UPB_ALIGN_UP_TO(sizeof(type), sizeof(void*))
+
+/* Initialize/uninitialize a msglayout from a msginit.  If upb uses v1
+ * internally, this will not allocate any memory.  Should only be used by
+ * generated code. */
+upb_msglayout *upb_msglayout_frominit_v1(
+    const upb_msglayout_msginit_v1 *init, upb_alloc *a);
+void upb_msglayout_uninit_v1(upb_msglayout *layout, upb_alloc *a);
 
 UPB_END_EXTERN_C
 
-#ifdef __cplusplus
-/* C++ inline wrappers. */
-namespace upb {
-inline reffed_ptr<SymbolTable> SymbolTable::New() {
-  upb_symtab *s = upb_symtab_new(&s);
-  return reffed_ptr<SymbolTable>(s, &s);
-}
+#endif /* UPB_MSG_H_ */
 
-inline void SymbolTable::Freeze() {
-  return upb_symtab_freeze(this);
-}
-inline const Def *SymbolTable::Resolve(const char *base,
-                                       const char *sym) const {
-  return upb_symtab_resolve(this, base, sym);
-}
-inline const Def* SymbolTable::Lookup(const char *sym) const {
-  return upb_symtab_lookup(this, sym);
-}
-inline const MessageDef *SymbolTable::LookupMessage(const char *sym) const {
-  return upb_symtab_lookupmsg(this, sym);
-}
-inline bool SymbolTable::Add(
-    Def*const* defs, size_t n, void* ref_donor, Status* status) {
-  return upb_symtab_add(this, (upb_def*const*)defs, n, ref_donor, status);
-}
-inline bool SymbolTable::AddFile(FileDef* file, Status* s) {
-  return upb_symtab_addfile(this, file, s);
-}
-}  /* namespace upb */
+UPB_BEGIN_EXTERN_C
+
+bool upb_decode(upb_stringview buf, void *msg,
+                const upb_msglayout_msginit_v1 *l, upb_env *env);
+
+UPB_END_EXTERN_C
+
+#endif  /* UPB_DECODE_H_ */
+/*
+** upb_encode: parsing into a upb_msg using a upb_msglayout.
+*/
+
+#ifndef UPB_ENCODE_H_
+#define UPB_ENCODE_H_
+
+
+UPB_BEGIN_EXTERN_C
+
+char *upb_encode(const void *msg, const upb_msglayout_msginit_v1 *l,
+                 upb_env *env, size_t *size);
+
+UPB_END_EXTERN_C
+
+#endif  /* UPB_ENCODE_H_ */
+/* This file was generated by upbc (the upb compiler) from the input
+ * file:
+ *
+ *     google/protobuf/descriptor.proto
+ *
+ * Do not edit -- your changes will be discarded when the file is
+ * regenerated. */
+
+#ifndef GOOGLE_PROTOBUF_DESCRIPTOR_PROTO_UPB_H_
+#define GOOGLE_PROTOBUF_DESCRIPTOR_PROTO_UPB_H_
+
+
+UPB_BEGIN_EXTERN_C
+
+struct google_protobuf_FileDescriptorSet;
+typedef struct google_protobuf_FileDescriptorSet google_protobuf_FileDescriptorSet;
+struct google_protobuf_FileDescriptorProto;
+typedef struct google_protobuf_FileDescriptorProto google_protobuf_FileDescriptorProto;
+struct google_protobuf_DescriptorProto;
+typedef struct google_protobuf_DescriptorProto google_protobuf_DescriptorProto;
+struct google_protobuf_DescriptorProto_ExtensionRange;
+typedef struct google_protobuf_DescriptorProto_ExtensionRange google_protobuf_DescriptorProto_ExtensionRange;
+struct google_protobuf_DescriptorProto_ReservedRange;
+typedef struct google_protobuf_DescriptorProto_ReservedRange google_protobuf_DescriptorProto_ReservedRange;
+struct google_protobuf_ExtensionRangeOptions;
+typedef struct google_protobuf_ExtensionRangeOptions google_protobuf_ExtensionRangeOptions;
+struct google_protobuf_FieldDescriptorProto;
+typedef struct google_protobuf_FieldDescriptorProto google_protobuf_FieldDescriptorProto;
+struct google_protobuf_OneofDescriptorProto;
+typedef struct google_protobuf_OneofDescriptorProto google_protobuf_OneofDescriptorProto;
+struct google_protobuf_EnumDescriptorProto;
+typedef struct google_protobuf_EnumDescriptorProto google_protobuf_EnumDescriptorProto;
+struct google_protobuf_EnumDescriptorProto_EnumReservedRange;
+typedef struct google_protobuf_EnumDescriptorProto_EnumReservedRange google_protobuf_EnumDescriptorProto_EnumReservedRange;
+struct google_protobuf_EnumValueDescriptorProto;
+typedef struct google_protobuf_EnumValueDescriptorProto google_protobuf_EnumValueDescriptorProto;
+struct google_protobuf_ServiceDescriptorProto;
+typedef struct google_protobuf_ServiceDescriptorProto google_protobuf_ServiceDescriptorProto;
+struct google_protobuf_MethodDescriptorProto;
+typedef struct google_protobuf_MethodDescriptorProto google_protobuf_MethodDescriptorProto;
+struct google_protobuf_FileOptions;
+typedef struct google_protobuf_FileOptions google_protobuf_FileOptions;
+struct google_protobuf_MessageOptions;
+typedef struct google_protobuf_MessageOptions google_protobuf_MessageOptions;
+struct google_protobuf_FieldOptions;
+typedef struct google_protobuf_FieldOptions google_protobuf_FieldOptions;
+struct google_protobuf_OneofOptions;
+typedef struct google_protobuf_OneofOptions google_protobuf_OneofOptions;
+struct google_protobuf_EnumOptions;
+typedef struct google_protobuf_EnumOptions google_protobuf_EnumOptions;
+struct google_protobuf_EnumValueOptions;
+typedef struct google_protobuf_EnumValueOptions google_protobuf_EnumValueOptions;
+struct google_protobuf_ServiceOptions;
+typedef struct google_protobuf_ServiceOptions google_protobuf_ServiceOptions;
+struct google_protobuf_MethodOptions;
+typedef struct google_protobuf_MethodOptions google_protobuf_MethodOptions;
+struct google_protobuf_UninterpretedOption;
+typedef struct google_protobuf_UninterpretedOption google_protobuf_UninterpretedOption;
+struct google_protobuf_UninterpretedOption_NamePart;
+typedef struct google_protobuf_UninterpretedOption_NamePart google_protobuf_UninterpretedOption_NamePart;
+struct google_protobuf_SourceCodeInfo;
+typedef struct google_protobuf_SourceCodeInfo google_protobuf_SourceCodeInfo;
+struct google_protobuf_SourceCodeInfo_Location;
+typedef struct google_protobuf_SourceCodeInfo_Location google_protobuf_SourceCodeInfo_Location;
+struct google_protobuf_GeneratedCodeInfo;
+typedef struct google_protobuf_GeneratedCodeInfo google_protobuf_GeneratedCodeInfo;
+struct google_protobuf_GeneratedCodeInfo_Annotation;
+typedef struct google_protobuf_GeneratedCodeInfo_Annotation google_protobuf_GeneratedCodeInfo_Annotation;
+/* Enums */
+
+typedef enum {
+  google_protobuf_FieldDescriptorProto_LABEL_OPTIONAL = 1,
+  google_protobuf_FieldDescriptorProto_LABEL_REQUIRED = 2,
+  google_protobuf_FieldDescriptorProto_LABEL_REPEATED = 3
+} google_protobuf_FieldDescriptorProto_Label;
+
+typedef enum {
+  google_protobuf_FieldDescriptorProto_TYPE_DOUBLE = 1,
+  google_protobuf_FieldDescriptorProto_TYPE_FLOAT = 2,
+  google_protobuf_FieldDescriptorProto_TYPE_INT64 = 3,
+  google_protobuf_FieldDescriptorProto_TYPE_UINT64 = 4,
+  google_protobuf_FieldDescriptorProto_TYPE_INT32 = 5,
+  google_protobuf_FieldDescriptorProto_TYPE_FIXED64 = 6,
+  google_protobuf_FieldDescriptorProto_TYPE_FIXED32 = 7,
+  google_protobuf_FieldDescriptorProto_TYPE_BOOL = 8,
+  google_protobuf_FieldDescriptorProto_TYPE_STRING = 9,
+  google_protobuf_FieldDescriptorProto_TYPE_GROUP = 10,
+  google_protobuf_FieldDescriptorProto_TYPE_MESSAGE = 11,
+  google_protobuf_FieldDescriptorProto_TYPE_BYTES = 12,
+  google_protobuf_FieldDescriptorProto_TYPE_UINT32 = 13,
+  google_protobuf_FieldDescriptorProto_TYPE_ENUM = 14,
+  google_protobuf_FieldDescriptorProto_TYPE_SFIXED32 = 15,
+  google_protobuf_FieldDescriptorProto_TYPE_SFIXED64 = 16,
+  google_protobuf_FieldDescriptorProto_TYPE_SINT32 = 17,
+  google_protobuf_FieldDescriptorProto_TYPE_SINT64 = 18
+} google_protobuf_FieldDescriptorProto_Type;
+
+typedef enum {
+  google_protobuf_FieldOptions_STRING = 0,
+  google_protobuf_FieldOptions_CORD = 1,
+  google_protobuf_FieldOptions_STRING_PIECE = 2
+} google_protobuf_FieldOptions_CType;
+
+typedef enum {
+  google_protobuf_FieldOptions_JS_NORMAL = 0,
+  google_protobuf_FieldOptions_JS_STRING = 1,
+  google_protobuf_FieldOptions_JS_NUMBER = 2
+} google_protobuf_FieldOptions_JSType;
+
+typedef enum {
+  google_protobuf_FileOptions_SPEED = 1,
+  google_protobuf_FileOptions_CODE_SIZE = 2,
+  google_protobuf_FileOptions_LITE_RUNTIME = 3
+} google_protobuf_FileOptions_OptimizeMode;
+
+typedef enum {
+  google_protobuf_MethodOptions_IDEMPOTENCY_UNKNOWN = 0,
+  google_protobuf_MethodOptions_NO_SIDE_EFFECTS = 1,
+  google_protobuf_MethodOptions_IDEMPOTENT = 2
+} google_protobuf_MethodOptions_IdempotencyLevel;
+
+/* google_protobuf_FileDescriptorSet */
+extern const upb_msglayout_msginit_v1 google_protobuf_FileDescriptorSet_msginit;
+google_protobuf_FileDescriptorSet *google_protobuf_FileDescriptorSet_new(upb_env *env);
+google_protobuf_FileDescriptorSet *google_protobuf_FileDescriptorSet_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_FileDescriptorSet_serialize(google_protobuf_FileDescriptorSet *msg, upb_env *env, size_t *len);
+void google_protobuf_FileDescriptorSet_free(google_protobuf_FileDescriptorSet *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_FileDescriptorSet_file(const google_protobuf_FileDescriptorSet *msg);
+
+/* setters. */
+void google_protobuf_FileDescriptorSet_set_file(google_protobuf_FileDescriptorSet *msg, upb_array* value);
+
+
+/* google_protobuf_FileDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_FileDescriptorProto_msginit;
+google_protobuf_FileDescriptorProto *google_protobuf_FileDescriptorProto_new(upb_env *env);
+google_protobuf_FileDescriptorProto *google_protobuf_FileDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_FileDescriptorProto_serialize(google_protobuf_FileDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_FileDescriptorProto_free(google_protobuf_FileDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_FileDescriptorProto_name(const google_protobuf_FileDescriptorProto *msg);
+upb_stringview google_protobuf_FileDescriptorProto_package(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_dependency(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_message_type(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_enum_type(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_service(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_extension(const google_protobuf_FileDescriptorProto *msg);
+const google_protobuf_FileOptions* google_protobuf_FileDescriptorProto_options(const google_protobuf_FileDescriptorProto *msg);
+const google_protobuf_SourceCodeInfo* google_protobuf_FileDescriptorProto_source_code_info(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_public_dependency(const google_protobuf_FileDescriptorProto *msg);
+const upb_array* google_protobuf_FileDescriptorProto_weak_dependency(const google_protobuf_FileDescriptorProto *msg);
+upb_stringview google_protobuf_FileDescriptorProto_syntax(const google_protobuf_FileDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_FileDescriptorProto_set_name(google_protobuf_FileDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FileDescriptorProto_set_package(google_protobuf_FileDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FileDescriptorProto_set_dependency(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_message_type(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_enum_type(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_service(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_extension(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_options(google_protobuf_FileDescriptorProto *msg, google_protobuf_FileOptions* value);
+void google_protobuf_FileDescriptorProto_set_source_code_info(google_protobuf_FileDescriptorProto *msg, google_protobuf_SourceCodeInfo* value);
+void google_protobuf_FileDescriptorProto_set_public_dependency(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_weak_dependency(google_protobuf_FileDescriptorProto *msg, upb_array* value);
+void google_protobuf_FileDescriptorProto_set_syntax(google_protobuf_FileDescriptorProto *msg, upb_stringview value);
+
+
+/* google_protobuf_DescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_DescriptorProto_msginit;
+google_protobuf_DescriptorProto *google_protobuf_DescriptorProto_new(upb_env *env);
+google_protobuf_DescriptorProto *google_protobuf_DescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_DescriptorProto_serialize(google_protobuf_DescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_DescriptorProto_free(google_protobuf_DescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_DescriptorProto_name(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_field(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_nested_type(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_enum_type(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_extension_range(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_extension(const google_protobuf_DescriptorProto *msg);
+const google_protobuf_MessageOptions* google_protobuf_DescriptorProto_options(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_oneof_decl(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_reserved_range(const google_protobuf_DescriptorProto *msg);
+const upb_array* google_protobuf_DescriptorProto_reserved_name(const google_protobuf_DescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_DescriptorProto_set_name(google_protobuf_DescriptorProto *msg, upb_stringview value);
+void google_protobuf_DescriptorProto_set_field(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_nested_type(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_enum_type(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_extension_range(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_extension(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_options(google_protobuf_DescriptorProto *msg, google_protobuf_MessageOptions* value);
+void google_protobuf_DescriptorProto_set_oneof_decl(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_reserved_range(google_protobuf_DescriptorProto *msg, upb_array* value);
+void google_protobuf_DescriptorProto_set_reserved_name(google_protobuf_DescriptorProto *msg, upb_array* value);
+
+
+/* google_protobuf_DescriptorProto_ExtensionRange */
+extern const upb_msglayout_msginit_v1 google_protobuf_DescriptorProto_ExtensionRange_msginit;
+google_protobuf_DescriptorProto_ExtensionRange *google_protobuf_DescriptorProto_ExtensionRange_new(upb_env *env);
+google_protobuf_DescriptorProto_ExtensionRange *google_protobuf_DescriptorProto_ExtensionRange_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_DescriptorProto_ExtensionRange_serialize(google_protobuf_DescriptorProto_ExtensionRange *msg, upb_env *env, size_t *len);
+void google_protobuf_DescriptorProto_ExtensionRange_free(google_protobuf_DescriptorProto_ExtensionRange *msg, upb_env *env);
+
+/* getters. */
+int32_t google_protobuf_DescriptorProto_ExtensionRange_start(const google_protobuf_DescriptorProto_ExtensionRange *msg);
+int32_t google_protobuf_DescriptorProto_ExtensionRange_end(const google_protobuf_DescriptorProto_ExtensionRange *msg);
+const google_protobuf_ExtensionRangeOptions* google_protobuf_DescriptorProto_ExtensionRange_options(const google_protobuf_DescriptorProto_ExtensionRange *msg);
+
+/* setters. */
+void google_protobuf_DescriptorProto_ExtensionRange_set_start(google_protobuf_DescriptorProto_ExtensionRange *msg, int32_t value);
+void google_protobuf_DescriptorProto_ExtensionRange_set_end(google_protobuf_DescriptorProto_ExtensionRange *msg, int32_t value);
+void google_protobuf_DescriptorProto_ExtensionRange_set_options(google_protobuf_DescriptorProto_ExtensionRange *msg, google_protobuf_ExtensionRangeOptions* value);
+
+
+/* google_protobuf_DescriptorProto_ReservedRange */
+extern const upb_msglayout_msginit_v1 google_protobuf_DescriptorProto_ReservedRange_msginit;
+google_protobuf_DescriptorProto_ReservedRange *google_protobuf_DescriptorProto_ReservedRange_new(upb_env *env);
+google_protobuf_DescriptorProto_ReservedRange *google_protobuf_DescriptorProto_ReservedRange_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_DescriptorProto_ReservedRange_serialize(google_protobuf_DescriptorProto_ReservedRange *msg, upb_env *env, size_t *len);
+void google_protobuf_DescriptorProto_ReservedRange_free(google_protobuf_DescriptorProto_ReservedRange *msg, upb_env *env);
+
+/* getters. */
+int32_t google_protobuf_DescriptorProto_ReservedRange_start(const google_protobuf_DescriptorProto_ReservedRange *msg);
+int32_t google_protobuf_DescriptorProto_ReservedRange_end(const google_protobuf_DescriptorProto_ReservedRange *msg);
+
+/* setters. */
+void google_protobuf_DescriptorProto_ReservedRange_set_start(google_protobuf_DescriptorProto_ReservedRange *msg, int32_t value);
+void google_protobuf_DescriptorProto_ReservedRange_set_end(google_protobuf_DescriptorProto_ReservedRange *msg, int32_t value);
+
+
+/* google_protobuf_ExtensionRangeOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_ExtensionRangeOptions_msginit;
+google_protobuf_ExtensionRangeOptions *google_protobuf_ExtensionRangeOptions_new(upb_env *env);
+google_protobuf_ExtensionRangeOptions *google_protobuf_ExtensionRangeOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_ExtensionRangeOptions_serialize(google_protobuf_ExtensionRangeOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_ExtensionRangeOptions_free(google_protobuf_ExtensionRangeOptions *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_ExtensionRangeOptions_uninterpreted_option(const google_protobuf_ExtensionRangeOptions *msg);
+
+/* setters. */
+void google_protobuf_ExtensionRangeOptions_set_uninterpreted_option(google_protobuf_ExtensionRangeOptions *msg, upb_array* value);
+
+
+/* google_protobuf_FieldDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_FieldDescriptorProto_msginit;
+google_protobuf_FieldDescriptorProto *google_protobuf_FieldDescriptorProto_new(upb_env *env);
+google_protobuf_FieldDescriptorProto *google_protobuf_FieldDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_FieldDescriptorProto_serialize(google_protobuf_FieldDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_FieldDescriptorProto_free(google_protobuf_FieldDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_FieldDescriptorProto_name(const google_protobuf_FieldDescriptorProto *msg);
+upb_stringview google_protobuf_FieldDescriptorProto_extendee(const google_protobuf_FieldDescriptorProto *msg);
+int32_t google_protobuf_FieldDescriptorProto_number(const google_protobuf_FieldDescriptorProto *msg);
+google_protobuf_FieldDescriptorProto_Label google_protobuf_FieldDescriptorProto_label(const google_protobuf_FieldDescriptorProto *msg);
+google_protobuf_FieldDescriptorProto_Type google_protobuf_FieldDescriptorProto_type(const google_protobuf_FieldDescriptorProto *msg);
+upb_stringview google_protobuf_FieldDescriptorProto_type_name(const google_protobuf_FieldDescriptorProto *msg);
+upb_stringview google_protobuf_FieldDescriptorProto_default_value(const google_protobuf_FieldDescriptorProto *msg);
+const google_protobuf_FieldOptions* google_protobuf_FieldDescriptorProto_options(const google_protobuf_FieldDescriptorProto *msg);
+int32_t google_protobuf_FieldDescriptorProto_oneof_index(const google_protobuf_FieldDescriptorProto *msg);
+upb_stringview google_protobuf_FieldDescriptorProto_json_name(const google_protobuf_FieldDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_FieldDescriptorProto_set_name(google_protobuf_FieldDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FieldDescriptorProto_set_extendee(google_protobuf_FieldDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FieldDescriptorProto_set_number(google_protobuf_FieldDescriptorProto *msg, int32_t value);
+void google_protobuf_FieldDescriptorProto_set_label(google_protobuf_FieldDescriptorProto *msg, google_protobuf_FieldDescriptorProto_Label value);
+void google_protobuf_FieldDescriptorProto_set_type(google_protobuf_FieldDescriptorProto *msg, google_protobuf_FieldDescriptorProto_Type value);
+void google_protobuf_FieldDescriptorProto_set_type_name(google_protobuf_FieldDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FieldDescriptorProto_set_default_value(google_protobuf_FieldDescriptorProto *msg, upb_stringview value);
+void google_protobuf_FieldDescriptorProto_set_options(google_protobuf_FieldDescriptorProto *msg, google_protobuf_FieldOptions* value);
+void google_protobuf_FieldDescriptorProto_set_oneof_index(google_protobuf_FieldDescriptorProto *msg, int32_t value);
+void google_protobuf_FieldDescriptorProto_set_json_name(google_protobuf_FieldDescriptorProto *msg, upb_stringview value);
+
+
+/* google_protobuf_OneofDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_OneofDescriptorProto_msginit;
+google_protobuf_OneofDescriptorProto *google_protobuf_OneofDescriptorProto_new(upb_env *env);
+google_protobuf_OneofDescriptorProto *google_protobuf_OneofDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_OneofDescriptorProto_serialize(google_protobuf_OneofDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_OneofDescriptorProto_free(google_protobuf_OneofDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_OneofDescriptorProto_name(const google_protobuf_OneofDescriptorProto *msg);
+const google_protobuf_OneofOptions* google_protobuf_OneofDescriptorProto_options(const google_protobuf_OneofDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_OneofDescriptorProto_set_name(google_protobuf_OneofDescriptorProto *msg, upb_stringview value);
+void google_protobuf_OneofDescriptorProto_set_options(google_protobuf_OneofDescriptorProto *msg, google_protobuf_OneofOptions* value);
+
+
+/* google_protobuf_EnumDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_EnumDescriptorProto_msginit;
+google_protobuf_EnumDescriptorProto *google_protobuf_EnumDescriptorProto_new(upb_env *env);
+google_protobuf_EnumDescriptorProto *google_protobuf_EnumDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_EnumDescriptorProto_serialize(google_protobuf_EnumDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_EnumDescriptorProto_free(google_protobuf_EnumDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_EnumDescriptorProto_name(const google_protobuf_EnumDescriptorProto *msg);
+const upb_array* google_protobuf_EnumDescriptorProto_value(const google_protobuf_EnumDescriptorProto *msg);
+const google_protobuf_EnumOptions* google_protobuf_EnumDescriptorProto_options(const google_protobuf_EnumDescriptorProto *msg);
+const upb_array* google_protobuf_EnumDescriptorProto_reserved_range(const google_protobuf_EnumDescriptorProto *msg);
+const upb_array* google_protobuf_EnumDescriptorProto_reserved_name(const google_protobuf_EnumDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_EnumDescriptorProto_set_name(google_protobuf_EnumDescriptorProto *msg, upb_stringview value);
+void google_protobuf_EnumDescriptorProto_set_value(google_protobuf_EnumDescriptorProto *msg, upb_array* value);
+void google_protobuf_EnumDescriptorProto_set_options(google_protobuf_EnumDescriptorProto *msg, google_protobuf_EnumOptions* value);
+void google_protobuf_EnumDescriptorProto_set_reserved_range(google_protobuf_EnumDescriptorProto *msg, upb_array* value);
+void google_protobuf_EnumDescriptorProto_set_reserved_name(google_protobuf_EnumDescriptorProto *msg, upb_array* value);
+
+
+/* google_protobuf_EnumDescriptorProto_EnumReservedRange */
+extern const upb_msglayout_msginit_v1 google_protobuf_EnumDescriptorProto_EnumReservedRange_msginit;
+google_protobuf_EnumDescriptorProto_EnumReservedRange *google_protobuf_EnumDescriptorProto_EnumReservedRange_new(upb_env *env);
+google_protobuf_EnumDescriptorProto_EnumReservedRange *google_protobuf_EnumDescriptorProto_EnumReservedRange_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_EnumDescriptorProto_EnumReservedRange_serialize(google_protobuf_EnumDescriptorProto_EnumReservedRange *msg, upb_env *env, size_t *len);
+void google_protobuf_EnumDescriptorProto_EnumReservedRange_free(google_protobuf_EnumDescriptorProto_EnumReservedRange *msg, upb_env *env);
+
+/* getters. */
+int32_t google_protobuf_EnumDescriptorProto_EnumReservedRange_start(const google_protobuf_EnumDescriptorProto_EnumReservedRange *msg);
+int32_t google_protobuf_EnumDescriptorProto_EnumReservedRange_end(const google_protobuf_EnumDescriptorProto_EnumReservedRange *msg);
+
+/* setters. */
+void google_protobuf_EnumDescriptorProto_EnumReservedRange_set_start(google_protobuf_EnumDescriptorProto_EnumReservedRange *msg, int32_t value);
+void google_protobuf_EnumDescriptorProto_EnumReservedRange_set_end(google_protobuf_EnumDescriptorProto_EnumReservedRange *msg, int32_t value);
+
+
+/* google_protobuf_EnumValueDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_EnumValueDescriptorProto_msginit;
+google_protobuf_EnumValueDescriptorProto *google_protobuf_EnumValueDescriptorProto_new(upb_env *env);
+google_protobuf_EnumValueDescriptorProto *google_protobuf_EnumValueDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_EnumValueDescriptorProto_serialize(google_protobuf_EnumValueDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_EnumValueDescriptorProto_free(google_protobuf_EnumValueDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_EnumValueDescriptorProto_name(const google_protobuf_EnumValueDescriptorProto *msg);
+int32_t google_protobuf_EnumValueDescriptorProto_number(const google_protobuf_EnumValueDescriptorProto *msg);
+const google_protobuf_EnumValueOptions* google_protobuf_EnumValueDescriptorProto_options(const google_protobuf_EnumValueDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_EnumValueDescriptorProto_set_name(google_protobuf_EnumValueDescriptorProto *msg, upb_stringview value);
+void google_protobuf_EnumValueDescriptorProto_set_number(google_protobuf_EnumValueDescriptorProto *msg, int32_t value);
+void google_protobuf_EnumValueDescriptorProto_set_options(google_protobuf_EnumValueDescriptorProto *msg, google_protobuf_EnumValueOptions* value);
+
+
+/* google_protobuf_ServiceDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_ServiceDescriptorProto_msginit;
+google_protobuf_ServiceDescriptorProto *google_protobuf_ServiceDescriptorProto_new(upb_env *env);
+google_protobuf_ServiceDescriptorProto *google_protobuf_ServiceDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_ServiceDescriptorProto_serialize(google_protobuf_ServiceDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_ServiceDescriptorProto_free(google_protobuf_ServiceDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_ServiceDescriptorProto_name(const google_protobuf_ServiceDescriptorProto *msg);
+const upb_array* google_protobuf_ServiceDescriptorProto_method(const google_protobuf_ServiceDescriptorProto *msg);
+const google_protobuf_ServiceOptions* google_protobuf_ServiceDescriptorProto_options(const google_protobuf_ServiceDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_ServiceDescriptorProto_set_name(google_protobuf_ServiceDescriptorProto *msg, upb_stringview value);
+void google_protobuf_ServiceDescriptorProto_set_method(google_protobuf_ServiceDescriptorProto *msg, upb_array* value);
+void google_protobuf_ServiceDescriptorProto_set_options(google_protobuf_ServiceDescriptorProto *msg, google_protobuf_ServiceOptions* value);
+
+
+/* google_protobuf_MethodDescriptorProto */
+extern const upb_msglayout_msginit_v1 google_protobuf_MethodDescriptorProto_msginit;
+google_protobuf_MethodDescriptorProto *google_protobuf_MethodDescriptorProto_new(upb_env *env);
+google_protobuf_MethodDescriptorProto *google_protobuf_MethodDescriptorProto_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_MethodDescriptorProto_serialize(google_protobuf_MethodDescriptorProto *msg, upb_env *env, size_t *len);
+void google_protobuf_MethodDescriptorProto_free(google_protobuf_MethodDescriptorProto *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_MethodDescriptorProto_name(const google_protobuf_MethodDescriptorProto *msg);
+upb_stringview google_protobuf_MethodDescriptorProto_input_type(const google_protobuf_MethodDescriptorProto *msg);
+upb_stringview google_protobuf_MethodDescriptorProto_output_type(const google_protobuf_MethodDescriptorProto *msg);
+const google_protobuf_MethodOptions* google_protobuf_MethodDescriptorProto_options(const google_protobuf_MethodDescriptorProto *msg);
+bool google_protobuf_MethodDescriptorProto_client_streaming(const google_protobuf_MethodDescriptorProto *msg);
+bool google_protobuf_MethodDescriptorProto_server_streaming(const google_protobuf_MethodDescriptorProto *msg);
+
+/* setters. */
+void google_protobuf_MethodDescriptorProto_set_name(google_protobuf_MethodDescriptorProto *msg, upb_stringview value);
+void google_protobuf_MethodDescriptorProto_set_input_type(google_protobuf_MethodDescriptorProto *msg, upb_stringview value);
+void google_protobuf_MethodDescriptorProto_set_output_type(google_protobuf_MethodDescriptorProto *msg, upb_stringview value);
+void google_protobuf_MethodDescriptorProto_set_options(google_protobuf_MethodDescriptorProto *msg, google_protobuf_MethodOptions* value);
+void google_protobuf_MethodDescriptorProto_set_client_streaming(google_protobuf_MethodDescriptorProto *msg, bool value);
+void google_protobuf_MethodDescriptorProto_set_server_streaming(google_protobuf_MethodDescriptorProto *msg, bool value);
+
+
+/* google_protobuf_FileOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_FileOptions_msginit;
+google_protobuf_FileOptions *google_protobuf_FileOptions_new(upb_env *env);
+google_protobuf_FileOptions *google_protobuf_FileOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_FileOptions_serialize(google_protobuf_FileOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_FileOptions_free(google_protobuf_FileOptions *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_FileOptions_java_package(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_java_outer_classname(const google_protobuf_FileOptions *msg);
+google_protobuf_FileOptions_OptimizeMode google_protobuf_FileOptions_optimize_for(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_java_multiple_files(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_go_package(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_cc_generic_services(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_java_generic_services(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_py_generic_services(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_java_generate_equals_and_hash(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_deprecated(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_java_string_check_utf8(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_cc_enable_arenas(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_objc_class_prefix(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_csharp_namespace(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_swift_prefix(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_php_class_prefix(const google_protobuf_FileOptions *msg);
+upb_stringview google_protobuf_FileOptions_php_namespace(const google_protobuf_FileOptions *msg);
+bool google_protobuf_FileOptions_php_generic_services(const google_protobuf_FileOptions *msg);
+const upb_array* google_protobuf_FileOptions_uninterpreted_option(const google_protobuf_FileOptions *msg);
+
+/* setters. */
+void google_protobuf_FileOptions_set_java_package(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_java_outer_classname(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_optimize_for(google_protobuf_FileOptions *msg, google_protobuf_FileOptions_OptimizeMode value);
+void google_protobuf_FileOptions_set_java_multiple_files(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_go_package(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_cc_generic_services(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_java_generic_services(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_py_generic_services(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_java_generate_equals_and_hash(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_deprecated(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_java_string_check_utf8(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_cc_enable_arenas(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_objc_class_prefix(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_csharp_namespace(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_swift_prefix(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_php_class_prefix(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_php_namespace(google_protobuf_FileOptions *msg, upb_stringview value);
+void google_protobuf_FileOptions_set_php_generic_services(google_protobuf_FileOptions *msg, bool value);
+void google_protobuf_FileOptions_set_uninterpreted_option(google_protobuf_FileOptions *msg, upb_array* value);
+
+
+/* google_protobuf_MessageOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_MessageOptions_msginit;
+google_protobuf_MessageOptions *google_protobuf_MessageOptions_new(upb_env *env);
+google_protobuf_MessageOptions *google_protobuf_MessageOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_MessageOptions_serialize(google_protobuf_MessageOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_MessageOptions_free(google_protobuf_MessageOptions *msg, upb_env *env);
+
+/* getters. */
+bool google_protobuf_MessageOptions_message_set_wire_format(const google_protobuf_MessageOptions *msg);
+bool google_protobuf_MessageOptions_no_standard_descriptor_accessor(const google_protobuf_MessageOptions *msg);
+bool google_protobuf_MessageOptions_deprecated(const google_protobuf_MessageOptions *msg);
+bool google_protobuf_MessageOptions_map_entry(const google_protobuf_MessageOptions *msg);
+const upb_array* google_protobuf_MessageOptions_uninterpreted_option(const google_protobuf_MessageOptions *msg);
+
+/* setters. */
+void google_protobuf_MessageOptions_set_message_set_wire_format(google_protobuf_MessageOptions *msg, bool value);
+void google_protobuf_MessageOptions_set_no_standard_descriptor_accessor(google_protobuf_MessageOptions *msg, bool value);
+void google_protobuf_MessageOptions_set_deprecated(google_protobuf_MessageOptions *msg, bool value);
+void google_protobuf_MessageOptions_set_map_entry(google_protobuf_MessageOptions *msg, bool value);
+void google_protobuf_MessageOptions_set_uninterpreted_option(google_protobuf_MessageOptions *msg, upb_array* value);
+
+
+/* google_protobuf_FieldOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_FieldOptions_msginit;
+google_protobuf_FieldOptions *google_protobuf_FieldOptions_new(upb_env *env);
+google_protobuf_FieldOptions *google_protobuf_FieldOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_FieldOptions_serialize(google_protobuf_FieldOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_FieldOptions_free(google_protobuf_FieldOptions *msg, upb_env *env);
+
+/* getters. */
+google_protobuf_FieldOptions_CType google_protobuf_FieldOptions_ctype(const google_protobuf_FieldOptions *msg);
+bool google_protobuf_FieldOptions_packed(const google_protobuf_FieldOptions *msg);
+bool google_protobuf_FieldOptions_deprecated(const google_protobuf_FieldOptions *msg);
+bool google_protobuf_FieldOptions_lazy(const google_protobuf_FieldOptions *msg);
+google_protobuf_FieldOptions_JSType google_protobuf_FieldOptions_jstype(const google_protobuf_FieldOptions *msg);
+bool google_protobuf_FieldOptions_weak(const google_protobuf_FieldOptions *msg);
+const upb_array* google_protobuf_FieldOptions_uninterpreted_option(const google_protobuf_FieldOptions *msg);
+
+/* setters. */
+void google_protobuf_FieldOptions_set_ctype(google_protobuf_FieldOptions *msg, google_protobuf_FieldOptions_CType value);
+void google_protobuf_FieldOptions_set_packed(google_protobuf_FieldOptions *msg, bool value);
+void google_protobuf_FieldOptions_set_deprecated(google_protobuf_FieldOptions *msg, bool value);
+void google_protobuf_FieldOptions_set_lazy(google_protobuf_FieldOptions *msg, bool value);
+void google_protobuf_FieldOptions_set_jstype(google_protobuf_FieldOptions *msg, google_protobuf_FieldOptions_JSType value);
+void google_protobuf_FieldOptions_set_weak(google_protobuf_FieldOptions *msg, bool value);
+void google_protobuf_FieldOptions_set_uninterpreted_option(google_protobuf_FieldOptions *msg, upb_array* value);
+
+
+/* google_protobuf_OneofOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_OneofOptions_msginit;
+google_protobuf_OneofOptions *google_protobuf_OneofOptions_new(upb_env *env);
+google_protobuf_OneofOptions *google_protobuf_OneofOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_OneofOptions_serialize(google_protobuf_OneofOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_OneofOptions_free(google_protobuf_OneofOptions *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_OneofOptions_uninterpreted_option(const google_protobuf_OneofOptions *msg);
+
+/* setters. */
+void google_protobuf_OneofOptions_set_uninterpreted_option(google_protobuf_OneofOptions *msg, upb_array* value);
+
+
+/* google_protobuf_EnumOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_EnumOptions_msginit;
+google_protobuf_EnumOptions *google_protobuf_EnumOptions_new(upb_env *env);
+google_protobuf_EnumOptions *google_protobuf_EnumOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_EnumOptions_serialize(google_protobuf_EnumOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_EnumOptions_free(google_protobuf_EnumOptions *msg, upb_env *env);
+
+/* getters. */
+bool google_protobuf_EnumOptions_allow_alias(const google_protobuf_EnumOptions *msg);
+bool google_protobuf_EnumOptions_deprecated(const google_protobuf_EnumOptions *msg);
+const upb_array* google_protobuf_EnumOptions_uninterpreted_option(const google_protobuf_EnumOptions *msg);
+
+/* setters. */
+void google_protobuf_EnumOptions_set_allow_alias(google_protobuf_EnumOptions *msg, bool value);
+void google_protobuf_EnumOptions_set_deprecated(google_protobuf_EnumOptions *msg, bool value);
+void google_protobuf_EnumOptions_set_uninterpreted_option(google_protobuf_EnumOptions *msg, upb_array* value);
+
+
+/* google_protobuf_EnumValueOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_EnumValueOptions_msginit;
+google_protobuf_EnumValueOptions *google_protobuf_EnumValueOptions_new(upb_env *env);
+google_protobuf_EnumValueOptions *google_protobuf_EnumValueOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_EnumValueOptions_serialize(google_protobuf_EnumValueOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_EnumValueOptions_free(google_protobuf_EnumValueOptions *msg, upb_env *env);
+
+/* getters. */
+bool google_protobuf_EnumValueOptions_deprecated(const google_protobuf_EnumValueOptions *msg);
+const upb_array* google_protobuf_EnumValueOptions_uninterpreted_option(const google_protobuf_EnumValueOptions *msg);
+
+/* setters. */
+void google_protobuf_EnumValueOptions_set_deprecated(google_protobuf_EnumValueOptions *msg, bool value);
+void google_protobuf_EnumValueOptions_set_uninterpreted_option(google_protobuf_EnumValueOptions *msg, upb_array* value);
+
+
+/* google_protobuf_ServiceOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_ServiceOptions_msginit;
+google_protobuf_ServiceOptions *google_protobuf_ServiceOptions_new(upb_env *env);
+google_protobuf_ServiceOptions *google_protobuf_ServiceOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_ServiceOptions_serialize(google_protobuf_ServiceOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_ServiceOptions_free(google_protobuf_ServiceOptions *msg, upb_env *env);
+
+/* getters. */
+bool google_protobuf_ServiceOptions_deprecated(const google_protobuf_ServiceOptions *msg);
+const upb_array* google_protobuf_ServiceOptions_uninterpreted_option(const google_protobuf_ServiceOptions *msg);
+
+/* setters. */
+void google_protobuf_ServiceOptions_set_deprecated(google_protobuf_ServiceOptions *msg, bool value);
+void google_protobuf_ServiceOptions_set_uninterpreted_option(google_protobuf_ServiceOptions *msg, upb_array* value);
+
+
+/* google_protobuf_MethodOptions */
+extern const upb_msglayout_msginit_v1 google_protobuf_MethodOptions_msginit;
+google_protobuf_MethodOptions *google_protobuf_MethodOptions_new(upb_env *env);
+google_protobuf_MethodOptions *google_protobuf_MethodOptions_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_MethodOptions_serialize(google_protobuf_MethodOptions *msg, upb_env *env, size_t *len);
+void google_protobuf_MethodOptions_free(google_protobuf_MethodOptions *msg, upb_env *env);
+
+/* getters. */
+bool google_protobuf_MethodOptions_deprecated(const google_protobuf_MethodOptions *msg);
+google_protobuf_MethodOptions_IdempotencyLevel google_protobuf_MethodOptions_idempotency_level(const google_protobuf_MethodOptions *msg);
+const upb_array* google_protobuf_MethodOptions_uninterpreted_option(const google_protobuf_MethodOptions *msg);
+
+/* setters. */
+void google_protobuf_MethodOptions_set_deprecated(google_protobuf_MethodOptions *msg, bool value);
+void google_protobuf_MethodOptions_set_idempotency_level(google_protobuf_MethodOptions *msg, google_protobuf_MethodOptions_IdempotencyLevel value);
+void google_protobuf_MethodOptions_set_uninterpreted_option(google_protobuf_MethodOptions *msg, upb_array* value);
+
+
+/* google_protobuf_UninterpretedOption */
+extern const upb_msglayout_msginit_v1 google_protobuf_UninterpretedOption_msginit;
+google_protobuf_UninterpretedOption *google_protobuf_UninterpretedOption_new(upb_env *env);
+google_protobuf_UninterpretedOption *google_protobuf_UninterpretedOption_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_UninterpretedOption_serialize(google_protobuf_UninterpretedOption *msg, upb_env *env, size_t *len);
+void google_protobuf_UninterpretedOption_free(google_protobuf_UninterpretedOption *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_UninterpretedOption_name(const google_protobuf_UninterpretedOption *msg);
+upb_stringview google_protobuf_UninterpretedOption_identifier_value(const google_protobuf_UninterpretedOption *msg);
+uint64_t google_protobuf_UninterpretedOption_positive_int_value(const google_protobuf_UninterpretedOption *msg);
+int64_t google_protobuf_UninterpretedOption_negative_int_value(const google_protobuf_UninterpretedOption *msg);
+double google_protobuf_UninterpretedOption_double_value(const google_protobuf_UninterpretedOption *msg);
+upb_stringview google_protobuf_UninterpretedOption_string_value(const google_protobuf_UninterpretedOption *msg);
+upb_stringview google_protobuf_UninterpretedOption_aggregate_value(const google_protobuf_UninterpretedOption *msg);
+
+/* setters. */
+void google_protobuf_UninterpretedOption_set_name(google_protobuf_UninterpretedOption *msg, upb_array* value);
+void google_protobuf_UninterpretedOption_set_identifier_value(google_protobuf_UninterpretedOption *msg, upb_stringview value);
+void google_protobuf_UninterpretedOption_set_positive_int_value(google_protobuf_UninterpretedOption *msg, uint64_t value);
+void google_protobuf_UninterpretedOption_set_negative_int_value(google_protobuf_UninterpretedOption *msg, int64_t value);
+void google_protobuf_UninterpretedOption_set_double_value(google_protobuf_UninterpretedOption *msg, double value);
+void google_protobuf_UninterpretedOption_set_string_value(google_protobuf_UninterpretedOption *msg, upb_stringview value);
+void google_protobuf_UninterpretedOption_set_aggregate_value(google_protobuf_UninterpretedOption *msg, upb_stringview value);
+
+
+/* google_protobuf_UninterpretedOption_NamePart */
+extern const upb_msglayout_msginit_v1 google_protobuf_UninterpretedOption_NamePart_msginit;
+google_protobuf_UninterpretedOption_NamePart *google_protobuf_UninterpretedOption_NamePart_new(upb_env *env);
+google_protobuf_UninterpretedOption_NamePart *google_protobuf_UninterpretedOption_NamePart_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_UninterpretedOption_NamePart_serialize(google_protobuf_UninterpretedOption_NamePart *msg, upb_env *env, size_t *len);
+void google_protobuf_UninterpretedOption_NamePart_free(google_protobuf_UninterpretedOption_NamePart *msg, upb_env *env);
+
+/* getters. */
+upb_stringview google_protobuf_UninterpretedOption_NamePart_name_part(const google_protobuf_UninterpretedOption_NamePart *msg);
+bool google_protobuf_UninterpretedOption_NamePart_is_extension(const google_protobuf_UninterpretedOption_NamePart *msg);
+
+/* setters. */
+void google_protobuf_UninterpretedOption_NamePart_set_name_part(google_protobuf_UninterpretedOption_NamePart *msg, upb_stringview value);
+void google_protobuf_UninterpretedOption_NamePart_set_is_extension(google_protobuf_UninterpretedOption_NamePart *msg, bool value);
+
+
+/* google_protobuf_SourceCodeInfo */
+extern const upb_msglayout_msginit_v1 google_protobuf_SourceCodeInfo_msginit;
+google_protobuf_SourceCodeInfo *google_protobuf_SourceCodeInfo_new(upb_env *env);
+google_protobuf_SourceCodeInfo *google_protobuf_SourceCodeInfo_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_SourceCodeInfo_serialize(google_protobuf_SourceCodeInfo *msg, upb_env *env, size_t *len);
+void google_protobuf_SourceCodeInfo_free(google_protobuf_SourceCodeInfo *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_SourceCodeInfo_location(const google_protobuf_SourceCodeInfo *msg);
+
+/* setters. */
+void google_protobuf_SourceCodeInfo_set_location(google_protobuf_SourceCodeInfo *msg, upb_array* value);
+
+
+/* google_protobuf_SourceCodeInfo_Location */
+extern const upb_msglayout_msginit_v1 google_protobuf_SourceCodeInfo_Location_msginit;
+google_protobuf_SourceCodeInfo_Location *google_protobuf_SourceCodeInfo_Location_new(upb_env *env);
+google_protobuf_SourceCodeInfo_Location *google_protobuf_SourceCodeInfo_Location_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_SourceCodeInfo_Location_serialize(google_protobuf_SourceCodeInfo_Location *msg, upb_env *env, size_t *len);
+void google_protobuf_SourceCodeInfo_Location_free(google_protobuf_SourceCodeInfo_Location *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_SourceCodeInfo_Location_path(const google_protobuf_SourceCodeInfo_Location *msg);
+const upb_array* google_protobuf_SourceCodeInfo_Location_span(const google_protobuf_SourceCodeInfo_Location *msg);
+upb_stringview google_protobuf_SourceCodeInfo_Location_leading_comments(const google_protobuf_SourceCodeInfo_Location *msg);
+upb_stringview google_protobuf_SourceCodeInfo_Location_trailing_comments(const google_protobuf_SourceCodeInfo_Location *msg);
+const upb_array* google_protobuf_SourceCodeInfo_Location_leading_detached_comments(const google_protobuf_SourceCodeInfo_Location *msg);
+
+/* setters. */
+void google_protobuf_SourceCodeInfo_Location_set_path(google_protobuf_SourceCodeInfo_Location *msg, upb_array* value);
+void google_protobuf_SourceCodeInfo_Location_set_span(google_protobuf_SourceCodeInfo_Location *msg, upb_array* value);
+void google_protobuf_SourceCodeInfo_Location_set_leading_comments(google_protobuf_SourceCodeInfo_Location *msg, upb_stringview value);
+void google_protobuf_SourceCodeInfo_Location_set_trailing_comments(google_protobuf_SourceCodeInfo_Location *msg, upb_stringview value);
+void google_protobuf_SourceCodeInfo_Location_set_leading_detached_comments(google_protobuf_SourceCodeInfo_Location *msg, upb_array* value);
+
+
+/* google_protobuf_GeneratedCodeInfo */
+extern const upb_msglayout_msginit_v1 google_protobuf_GeneratedCodeInfo_msginit;
+google_protobuf_GeneratedCodeInfo *google_protobuf_GeneratedCodeInfo_new(upb_env *env);
+google_protobuf_GeneratedCodeInfo *google_protobuf_GeneratedCodeInfo_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_GeneratedCodeInfo_serialize(google_protobuf_GeneratedCodeInfo *msg, upb_env *env, size_t *len);
+void google_protobuf_GeneratedCodeInfo_free(google_protobuf_GeneratedCodeInfo *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_GeneratedCodeInfo_annotation(const google_protobuf_GeneratedCodeInfo *msg);
+
+/* setters. */
+void google_protobuf_GeneratedCodeInfo_set_annotation(google_protobuf_GeneratedCodeInfo *msg, upb_array* value);
+
+
+/* google_protobuf_GeneratedCodeInfo_Annotation */
+extern const upb_msglayout_msginit_v1 google_protobuf_GeneratedCodeInfo_Annotation_msginit;
+google_protobuf_GeneratedCodeInfo_Annotation *google_protobuf_GeneratedCodeInfo_Annotation_new(upb_env *env);
+google_protobuf_GeneratedCodeInfo_Annotation *google_protobuf_GeneratedCodeInfo_Annotation_parsenew(upb_stringview buf, upb_env *env);
+char *google_protobuf_GeneratedCodeInfo_Annotation_serialize(google_protobuf_GeneratedCodeInfo_Annotation *msg, upb_env *env, size_t *len);
+void google_protobuf_GeneratedCodeInfo_Annotation_free(google_protobuf_GeneratedCodeInfo_Annotation *msg, upb_env *env);
+
+/* getters. */
+const upb_array* google_protobuf_GeneratedCodeInfo_Annotation_path(const google_protobuf_GeneratedCodeInfo_Annotation *msg);
+upb_stringview google_protobuf_GeneratedCodeInfo_Annotation_source_file(const google_protobuf_GeneratedCodeInfo_Annotation *msg);
+int32_t google_protobuf_GeneratedCodeInfo_Annotation_begin(const google_protobuf_GeneratedCodeInfo_Annotation *msg);
+int32_t google_protobuf_GeneratedCodeInfo_Annotation_end(const google_protobuf_GeneratedCodeInfo_Annotation *msg);
+
+/* setters. */
+void google_protobuf_GeneratedCodeInfo_Annotation_set_path(google_protobuf_GeneratedCodeInfo_Annotation *msg, upb_array* value);
+void google_protobuf_GeneratedCodeInfo_Annotation_set_source_file(google_protobuf_GeneratedCodeInfo_Annotation *msg, upb_stringview value);
+void google_protobuf_GeneratedCodeInfo_Annotation_set_begin(google_protobuf_GeneratedCodeInfo_Annotation *msg, int32_t value);
+void google_protobuf_GeneratedCodeInfo_Annotation_set_end(google_protobuf_GeneratedCodeInfo_Annotation *msg, int32_t value);
+
+
+UPB_END_EXTERN_C
+
+#endif  /* GOOGLE_PROTOBUF_DESCRIPTOR_PROTO_UPB_H_ */
+/*
+** structs.int.h: structures definitions that are internal to upb.
+*/
+
+#ifndef UPB_STRUCTS_H_
+#define UPB_STRUCTS_H_
+
+struct upb_array {
+  upb_fieldtype_t type;
+  uint8_t element_size;
+  void *data;   /* Each element is element_size. */
+  size_t len;   /* Measured in elements. */
+  size_t size;  /* Measured in elements. */
+  upb_alloc *alloc;
+};
+
+#endif  /* UPB_STRUCTS_H_ */
+
+/*
+** This file contains definitions of structs that should be considered private
+** and NOT stable across versions of upb.
+**
+** The only reason they are declared here and not in .c files is to allow upb
+** and the application (if desired) to embed statically-initialized instances
+** of structures like defs.
+**
+** If you include this file, all guarantees of ABI compatibility go out the
+** window!  Any code that includes this file needs to recompile against the
+** exact same version of upb that they are linking against.
+**
+** You also need to recompile if you change the value of the UPB_DEBUG_REFS
+** flag.
+*/
+
+
+#ifndef UPB_STATICINIT_H_
+#define UPB_STATICINIT_H_
+
+#ifdef __cplusplus
+/* Because of how we do our typedefs, this header can't be included from C++. */
+#error This file cannot be included from C++
 #endif
 
-#endif  /* UPB_SYMTAB_H_ */
+/* upb_refcounted *************************************************************/
+
+
+/* upb_def ********************************************************************/
+
+struct upb_def {
+  upb_refcounted base;
+
+  const char *fullname;
+  const upb_filedef* file;
+  char type;  /* A upb_deftype_t (char to save space) */
+
+  /* Used as a flag during the def's mutable stage.  Must be false unless
+   * it is currently being used by a function on the stack.  This allows
+   * us to easily determine which defs were passed into the function's
+   * current invocation. */
+  bool came_from_user;
+};
+
+#define UPB_DEF_INIT(name, type, vtbl, refs, ref2s) \
+    { UPB_REFCOUNT_INIT(vtbl, refs, ref2s), name, NULL, type, false }
+
+
+/* upb_fielddef ***************************************************************/
+
+struct upb_fielddef {
+  upb_def base;
+
+  union {
+    int64_t sint;
+    uint64_t uint;
+    double dbl;
+    float flt;
+    void *bytes;
+  } defaultval;
+  union {
+    const upb_msgdef *def;  /* If !msg_is_symbolic. */
+    char *name;             /* If msg_is_symbolic. */
+  } msg;
+  union {
+    const upb_def *def;  /* If !subdef_is_symbolic. */
+    char *name;          /* If subdef_is_symbolic. */
+  } sub;  /* The msgdef or enumdef for this field, if upb_hassubdef(f). */
+  bool subdef_is_symbolic;
+  bool msg_is_symbolic;
+  const upb_oneofdef *oneof;
+  bool default_is_string;
+  bool type_is_set_;     /* False until type is explicitly set. */
+  bool is_extension_;
+  bool lazy_;
+  bool packed_;
+  upb_intfmt_t intfmt;
+  bool tagdelim;
+  upb_fieldtype_t type_;
+  upb_label_t label_;
+  uint32_t number_;
+  uint32_t selector_base;  /* Used to index into a upb::Handlers table. */
+  uint32_t index_;
+};
+
+extern const struct upb_refcounted_vtbl upb_fielddef_vtbl;
+
+#define UPB_FIELDDEF_INIT(label, type, intfmt, tagdelim, is_extension, lazy,   \
+                          packed, name, num, msgdef, subdef, selector_base,    \
+                          index, defaultval, refs, ref2s)                      \
+  {                                                                            \
+    UPB_DEF_INIT(name, UPB_DEF_FIELD, &upb_fielddef_vtbl, refs, ref2s),        \
+        defaultval, {msgdef}, {subdef}, NULL, false, false,                    \
+        type == UPB_TYPE_STRING || type == UPB_TYPE_BYTES, true, is_extension, \
+        lazy, packed, intfmt, tagdelim, type, label, num, selector_base, index \
+  }
+
+
+/* upb_msgdef *****************************************************************/
+
+struct upb_msgdef {
+  upb_def base;
+
+  size_t selector_count;
+  uint32_t submsg_field_count;
+
+  /* Tables for looking up fields by number and name. */
+  upb_inttable itof;  /* int to field */
+  upb_strtable ntof;  /* name to field/oneof */
+
+  /* Is this a map-entry message? */
+  bool map_entry;
+
+  /* Whether this message has proto2 or proto3 semantics. */
+  upb_syntax_t syntax;
+
+  /* TODO(haberman): proper extension ranges (there can be multiple). */
+};
+
+extern const struct upb_refcounted_vtbl upb_msgdef_vtbl;
+
+/* TODO: also support static initialization of the oneofs table. This will be
+ * needed if we compile in descriptors that contain oneofs. */
+#define UPB_MSGDEF_INIT(name, selector_count, submsg_field_count, itof, ntof, \
+                        map_entry, syntax, refs, ref2s)                       \
+  {                                                                           \
+    UPB_DEF_INIT(name, UPB_DEF_MSG, &upb_fielddef_vtbl, refs, ref2s),         \
+        selector_count, submsg_field_count, itof, ntof, map_entry, syntax     \
+  }
+
+
+/* upb_enumdef ****************************************************************/
+
+struct upb_enumdef {
+  upb_def base;
+
+  upb_strtable ntoi;
+  upb_inttable iton;
+  int32_t defaultval;
+};
+
+extern const struct upb_refcounted_vtbl upb_enumdef_vtbl;
+
+#define UPB_ENUMDEF_INIT(name, ntoi, iton, defaultval, refs, ref2s) \
+  { UPB_DEF_INIT(name, UPB_DEF_ENUM, &upb_enumdef_vtbl, refs, ref2s), ntoi,    \
+    iton, defaultval }
+
+
+/* upb_oneofdef ***************************************************************/
+
+struct upb_oneofdef {
+  upb_refcounted base;
+
+  uint32_t index;  /* Index within oneofs. */
+  const char *name;
+  upb_strtable ntof;
+  upb_inttable itof;
+  const upb_msgdef *parent;
+};
+
+extern const struct upb_refcounted_vtbl upb_oneofdef_vtbl;
+
+#define UPB_ONEOFDEF_INIT(name, ntof, itof, refs, ref2s) \
+  { UPB_REFCOUNT_INIT(&upb_oneofdef_vtbl, refs, ref2s), 0, name, ntof, itof }
+
+
+/* upb_symtab *****************************************************************/
+
+struct upb_symtab {
+  upb_refcounted base;
+
+  upb_strtable symtab;
+};
+
+struct upb_filedef {
+  upb_refcounted base;
+
+  const char *name;
+  const char *package;
+  const char *phpprefix;
+  const char *phpnamespace;
+  upb_syntax_t syntax;
+
+  upb_inttable defs;
+  upb_inttable deps;
+};
+
+extern const struct upb_refcounted_vtbl upb_filedef_vtbl;
+
+#endif  /* UPB_STATICINIT_H_ */
 /*
 ** upb::descriptor::Reader (upb_descreader)
 **
@@ -6699,53 +7813,6 @@ inline FileDef* Reader::file(size_t i) const {
 
 
 UPB_BEGIN_EXTERN_C
-
-/* Enums */
-
-typedef enum {
-  google_protobuf_FieldDescriptorProto_LABEL_OPTIONAL = 1,
-  google_protobuf_FieldDescriptorProto_LABEL_REQUIRED = 2,
-  google_protobuf_FieldDescriptorProto_LABEL_REPEATED = 3
-} google_protobuf_FieldDescriptorProto_Label;
-
-typedef enum {
-  google_protobuf_FieldDescriptorProto_TYPE_DOUBLE = 1,
-  google_protobuf_FieldDescriptorProto_TYPE_FLOAT = 2,
-  google_protobuf_FieldDescriptorProto_TYPE_INT64 = 3,
-  google_protobuf_FieldDescriptorProto_TYPE_UINT64 = 4,
-  google_protobuf_FieldDescriptorProto_TYPE_INT32 = 5,
-  google_protobuf_FieldDescriptorProto_TYPE_FIXED64 = 6,
-  google_protobuf_FieldDescriptorProto_TYPE_FIXED32 = 7,
-  google_protobuf_FieldDescriptorProto_TYPE_BOOL = 8,
-  google_protobuf_FieldDescriptorProto_TYPE_STRING = 9,
-  google_protobuf_FieldDescriptorProto_TYPE_GROUP = 10,
-  google_protobuf_FieldDescriptorProto_TYPE_MESSAGE = 11,
-  google_protobuf_FieldDescriptorProto_TYPE_BYTES = 12,
-  google_protobuf_FieldDescriptorProto_TYPE_UINT32 = 13,
-  google_protobuf_FieldDescriptorProto_TYPE_ENUM = 14,
-  google_protobuf_FieldDescriptorProto_TYPE_SFIXED32 = 15,
-  google_protobuf_FieldDescriptorProto_TYPE_SFIXED64 = 16,
-  google_protobuf_FieldDescriptorProto_TYPE_SINT32 = 17,
-  google_protobuf_FieldDescriptorProto_TYPE_SINT64 = 18
-} google_protobuf_FieldDescriptorProto_Type;
-
-typedef enum {
-  google_protobuf_FieldOptions_STRING = 0,
-  google_protobuf_FieldOptions_CORD = 1,
-  google_protobuf_FieldOptions_STRING_PIECE = 2
-} google_protobuf_FieldOptions_CType;
-
-typedef enum {
-  google_protobuf_FieldOptions_JS_NORMAL = 0,
-  google_protobuf_FieldOptions_JS_STRING = 1,
-  google_protobuf_FieldOptions_JS_NUMBER = 2
-} google_protobuf_FieldOptions_JSType;
-
-typedef enum {
-  google_protobuf_FileOptions_SPEED = 1,
-  google_protobuf_FileOptions_CODE_SIZE = 2,
-  google_protobuf_FileOptions_LITE_RUNTIME = 3
-} google_protobuf_FileOptions_OptimizeMode;
 
 /* MessageDefs: call these functions to get a ref to a msgdef. */
 const upb_msgdef *upbdefs_google_protobuf_DescriptorProto_get(const void *owner);
@@ -6934,6 +8001,8 @@ UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_java_string
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_javanano_use_deprecated_package(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 38); }
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_objc_class_prefix(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 36); }
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_optimize_for(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 9); }
+UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_php_class_prefix(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 40); }
+UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_php_namespace(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 41); }
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_py_generic_services(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 18); }
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_FileOptions_f_uninterpreted_option(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_FileOptions_is(m)); return upb_msgdef_itof(m, 999); }
 UPB_INLINE const upb_fielddef *upbdefs_google_protobuf_MessageOptions_f_deprecated(const upb_msgdef *m) { UPB_ASSERT(upbdefs_google_protobuf_MessageOptions_is(m)); return upb_msgdef_itof(m, 3); }
@@ -7985,21 +9054,9 @@ UPB_INLINE void upb_pbdecoder_unpackdispatch(uint64_t dispatch, uint64_t *ofs,
 extern "C" {
 #endif
 
-/* A list of types as they are encoded on-the-wire. */
-typedef enum {
-  UPB_WIRE_TYPE_VARINT      = 0,
-  UPB_WIRE_TYPE_64BIT       = 1,
-  UPB_WIRE_TYPE_DELIMITED   = 2,
-  UPB_WIRE_TYPE_START_GROUP = 3,
-  UPB_WIRE_TYPE_END_GROUP   = 4,
-  UPB_WIRE_TYPE_32BIT       = 5
-} upb_wiretype_t;
-
 #define UPB_MAX_WIRE_TYPE 5
 
-/* The maximum number of bytes that it takes to encode a 64-bit varint.
- * Note that with a better encoding this could be 9 (TODO: write up a
- * wiki document about this). */
+/* The maximum number of bytes that it takes to encode a 64-bit varint. */
 #define UPB_PB_VARINT_MAX_LEN 10
 
 /* Array of the "native" (ie. non-packed-repeated) wire type for the given a
@@ -8032,16 +9089,8 @@ UPB_INLINE upb_decoderet upb_decoderet_make(const char *p, uint64_t val) {
   return ret;
 }
 
-/* Four functions for decoding a varint of at most eight bytes.  They are all
- * functionally identical, but are implemented in different ways and likely have
- * different performance profiles.  We keep them around for performance testing.
- *
- * Note that these functions may not read byte-by-byte, so they must not be used
- * unless there are at least eight bytes left in the buffer! */
 upb_decoderet upb_vdecode_max8_branch32(upb_decoderet r);
 upb_decoderet upb_vdecode_max8_branch64(upb_decoderet r);
-upb_decoderet upb_vdecode_max8_wright(upb_decoderet r);
-upb_decoderet upb_vdecode_max8_massimino(upb_decoderet r);
 
 /* Template for a function that checks the first two bytes with branching
  * and dispatches 2-10 bytes with a separate function.  Note that this may read
@@ -8066,8 +9115,6 @@ UPB_INLINE upb_decoderet upb_vdecode_check2_ ## name(const char *_p) {         \
 
 UPB_VARINT_DECODER_CHECK2(branch32, upb_vdecode_max8_branch32)
 UPB_VARINT_DECODER_CHECK2(branch64, upb_vdecode_max8_branch64)
-UPB_VARINT_DECODER_CHECK2(wright, upb_vdecode_max8_wright)
-UPB_VARINT_DECODER_CHECK2(massimino, upb_vdecode_max8_massimino)
 #undef UPB_VARINT_DECODER_CHECK2
 
 /* Our canonical functions for decoding varints, based on the currently
@@ -8077,10 +9124,6 @@ UPB_INLINE upb_decoderet upb_vdecode_fast(const char *p) {
     return upb_vdecode_check2_branch64(p);
   else
     return upb_vdecode_check2_branch32(p);
-}
-
-UPB_INLINE upb_decoderet upb_vdecode_max8_fast(upb_decoderet r) {
-  return upb_vdecode_max8_massimino(r);
 }
 
 

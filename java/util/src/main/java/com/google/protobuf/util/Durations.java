@@ -30,7 +30,6 @@
 
 package com.google.protobuf.util;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.math.IntMath.checkedAdd;
 import static com.google.common.math.IntMath.checkedSubtract;
 import static com.google.common.math.LongMath.checkedAdd;
@@ -42,7 +41,6 @@ import static com.google.protobuf.util.Timestamps.NANOS_PER_MICROSECOND;
 import static com.google.protobuf.util.Timestamps.NANOS_PER_MILLISECOND;
 import static com.google.protobuf.util.Timestamps.NANOS_PER_SECOND;
 
-import com.google.common.collect.ComparisonChain;
 import com.google.protobuf.Duration;
 import java.text.ParseException;
 import java.util.Comparator;
@@ -71,11 +69,8 @@ public final class Durations {
         public int compare(Duration d1, Duration d2) {
           checkValid(d1);
           checkValid(d2);
-
-          return ComparisonChain.start()
-              .compare(d1.getSeconds(), d2.getSeconds())
-              .compare(d1.getNanos(), d2.getNanos())
-              .result();
+          int secDiff = Long.compare(d1.getSeconds(), d2.getSeconds());
+          return (secDiff != 0) ? secDiff : Integer.compare(d1.getNanos(), d2.getNanos());
         }
       };
 
@@ -85,6 +80,17 @@ public final class Durations {
    */
   public static Comparator<Duration> comparator() {
     return COMPARATOR;
+  }
+
+  /**
+   * Compares two durations. The value returned is identical to what would be returned by:
+   * {@code Durations.comparator().compare(x, y)}.
+   *
+   * @return the value {@code 0} if {@code x == y}; a value less than {@code 0} if {@code x < y};
+   *     and a value greater than {@code 0} if {@code x > y}
+   */
+  public static int compare(Duration x, Duration y) {
+    return COMPARATOR.compare(x, y);
   }
 
   /**
@@ -128,14 +134,13 @@ public final class Durations {
   public static Duration checkValid(Duration duration) {
     long seconds = duration.getSeconds();
     int nanos = duration.getNanos();
-    checkArgument(
-        isValid(seconds, nanos),
-        "Duration is not valid. See proto definition for valid values. "
+    if (!isValid(seconds, nanos)) {
+        throw new IllegalArgumentException(String.format(
+            "Duration is not valid. See proto definition for valid values. "
             + "Seconds (%s) must be in range [-315,576,000,000, +315,576,000,000]. "
             + "Nanos (%s) must be in range [-999,999,999, +999,999,999]. "
-            + "Nanos must have the same sign as seconds",
-        seconds,
-        nanos);
+            + "Nanos must have the same sign as seconds", seconds, nanos));
+    }
     return duration;
   }
 

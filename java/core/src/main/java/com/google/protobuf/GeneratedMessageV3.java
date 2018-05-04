@@ -30,14 +30,25 @@
 
 package com.google.protobuf;
 
+import static com.google.protobuf.Internal.checkNotNull;
+
 import com.google.protobuf.Descriptors.Descriptor;
 import com.google.protobuf.Descriptors.EnumDescriptor;
 import com.google.protobuf.Descriptors.EnumValueDescriptor;
 import com.google.protobuf.Descriptors.FieldDescriptor;
 import com.google.protobuf.Descriptors.FileDescriptor;
 import com.google.protobuf.Descriptors.OneofDescriptor;
+// In opensource protobuf, we have versioned this GeneratedMessageV3 class to GeneratedMessageV3V3 and
+// in the future may have GeneratedMessageV3V4 etc. This allows us to change some aspects of this
+// class without breaking binary compatibility with old generated code that still subclasses
+// the old GeneratedMessageV3 class. To allow these different GeneratedMessageV3V? classes to
+// interoperate (e.g., a GeneratedMessageV3V3 object has a message extension field whose class
+// type is GeneratedMessageV3V4), these classes still share a common parent class AbstractMessage
+// and are using the same GeneratedMessage.GeneratedExtension class for extension definitions.
+// Since this class becomes GeneratedMessageV3V? in opensource, we have to add an import here
+// to be able to use GeneratedMessage.GeneratedExtension. The GeneratedExtension definition in
+// this file is also excluded from opensource to avoid conflict.
 import com.google.protobuf.GeneratedMessage.GeneratedExtension;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectStreamException;
@@ -267,13 +278,30 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
 
   /**
    * Called by subclasses to parse an unknown field.
+   *
    * @return {@code true} unless the tag is an end-group tag.
    */
   protected boolean parseUnknownField(
       CodedInputStream input,
       UnknownFieldSet.Builder unknownFields,
       ExtensionRegistryLite extensionRegistry,
-      int tag) throws IOException {
+      int tag)
+      throws IOException {
+    if (input.shouldDiscardUnknownFields()) {
+      return input.skipField(tag);
+    }
+    return unknownFields.mergeFieldFrom(tag, input);
+  }
+
+  protected boolean parseUnknownFieldProto3(
+      CodedInputStream input,
+      UnknownFieldSet.Builder unknownFields,
+      ExtensionRegistryLite extensionRegistry,
+      int tag)
+      throws IOException {
+    if (input.shouldDiscardUnknownFieldsProto3()) {
+      return input.skipField(tag);
+    }
     return unknownFields.mergeFieldFrom(tag, input);
   }
 
@@ -329,6 +357,10 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
     } catch (InvalidProtocolBufferException e) {
       throw e.unwrapIOException();
     }
+  }
+  
+  protected static boolean canUseUnsafe() {
+    return UnsafeUtil.hasUnsafeArrayOperations() && UnsafeUtil.hasUnsafeByteBufferOperations();
   }
 
   @Override
@@ -609,16 +641,24 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       return (BuilderType) this;
     }
 
-    @Override
-    public BuilderType mergeUnknownFields(
-        final UnknownFieldSet unknownFields) {
-      this.unknownFields =
-        UnknownFieldSet.newBuilder(this.unknownFields)
-                       .mergeFrom(unknownFields)
-                       .build();
+    protected BuilderType setUnknownFieldsProto3(final UnknownFieldSet unknownFields) {
+      if (CodedInputStream.getProto3DiscardUnknownFieldsDefault()) {
+        return (BuilderType) this;
+      }
+      this.unknownFields = unknownFields;
       onChanged();
       return (BuilderType) this;
     }
+
+    @Override
+    public BuilderType mergeUnknownFields(
+        final UnknownFieldSet unknownFields) {
+      return setUnknownFields(
+        UnknownFieldSet.newBuilder(this.unknownFields)
+                       .mergeFrom(unknownFields)
+                       .build());
+    }
+
 
     @Override
     public boolean isInitialized() {
@@ -653,18 +693,6 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
     @Override
     public final UnknownFieldSet getUnknownFields() {
       return unknownFields;
-    }
-
-    /**
-     * Called by subclasses to parse an unknown field.
-     * @return {@code true} unless the tag is an end-group tag.
-     */
-    protected boolean parseUnknownField(
-        final CodedInputStream input,
-        final UnknownFieldSet.Builder unknownFields,
-        final ExtensionRegistryLite extensionRegistry,
-        final int tag) throws IOException {
-      return unknownFields.mergeFieldFrom(tag, input);
     }
 
     /**
@@ -856,6 +884,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
 
     /** Check if a singular extension is present. */
     @Override
+    @SuppressWarnings("unchecked")
     public final <Type> boolean hasExtension(final ExtensionLite<MessageType, Type> extensionLite) {
       Extension<MessageType, Type> extension = checkNotLite(extensionLite);
 
@@ -865,6 +894,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
 
     /** Get the number of elements in a repeated extension. */
     @Override
+    @SuppressWarnings("unchecked")
     public final <Type> int getExtensionCount(
         final ExtensionLite<MessageType, List<Type>> extensionLite) {
       Extension<MessageType, List<Type>> extension = checkNotLite(extensionLite);
@@ -975,8 +1005,23 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
         ExtensionRegistryLite extensionRegistry,
         int tag) throws IOException {
       return MessageReflection.mergeFieldFrom(
-          input, unknownFields, extensionRegistry, getDescriptorForType(),
-          new MessageReflection.ExtensionAdapter(extensions), tag);
+          input, input.shouldDiscardUnknownFields() ? null : unknownFields, extensionRegistry,
+          getDescriptorForType(), new MessageReflection.ExtensionAdapter(extensions), tag);
+    }
+
+    @Override
+    protected boolean parseUnknownFieldProto3(
+        CodedInputStream input,
+        UnknownFieldSet.Builder unknownFields,
+        ExtensionRegistryLite extensionRegistry,
+        int tag) throws IOException {
+      return MessageReflection.mergeFieldFrom(
+          input,
+          input.shouldDiscardUnknownFieldsProto3() ? null : unknownFields,
+          extensionRegistry,
+          getDescriptorForType(),
+          new MessageReflection.ExtensionAdapter(extensions),
+          tag);
     }
 
 
@@ -1205,14 +1250,6 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
     public BuilderType clear() {
       extensions = FieldSet.emptySet();
       return super.clear();
-    }
-
-    // This is implemented here only to work around an apparent bug in the
-    // Java compiler and/or build system.  See bug #1898463.  The mere presence
-    // of this clone() implementation makes it go away.
-    @Override
-    public BuilderType clone() {
-      return super.clone();
     }
 
     private void ensureExtensionsIsMutable() {
@@ -1454,21 +1491,6 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       return super.isInitialized() && extensionsAreInitialized();
     }
 
-    /**
-     * Called by subclasses to parse an unknown field or an extension.
-     * @return {@code true} unless the tag is an end-group tag.
-     */
-    @Override
-    protected boolean parseUnknownField(
-        final CodedInputStream input,
-        final UnknownFieldSet.Builder unknownFields,
-        final ExtensionRegistryLite extensionRegistry,
-        final int tag) throws IOException {
-      return MessageReflection.mergeFieldFrom(
-          input, unknownFields, extensionRegistry, getDescriptorForType(),
-          new MessageReflection.BuilderAdapter(this), tag);
-    }
-
     // ---------------------------------------------------------------
     // Reflection
 
@@ -1610,6 +1632,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
     FieldDescriptor getDescriptor();
   }
 
+
   // =================================================================
 
   /** Calls Class.getMethod and throws a RuntimeException if it fails. */
@@ -1705,11 +1728,6 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       initialized = false;
     }
 
-    private boolean isMapFieldEnabled(FieldDescriptor field) {
-      boolean result = true;
-      return result;
-    }
-
     /**
      * Ensures the field accessors are initialized. This method is thread-safe.
      *
@@ -1733,7 +1751,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
           }
           if (field.isRepeated()) {
             if (field.getJavaType() == FieldDescriptor.JavaType.MESSAGE) {
-              if (field.isMapField() && isMapFieldEnabled(field)) {
+              if (field.isMapField()) {
                 fields[i] = new MapFieldAccessor(
                     field, camelCaseNames[i], messageClass, builderClass);
               } else {
@@ -2221,6 +2239,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       }
 
       @Override
+      @SuppressWarnings("unchecked")
       public Object get(GeneratedMessageV3 message) {
         List result = new ArrayList();
         for (int i = 0; i < getRepeatedCount(message); i++) {
@@ -2230,6 +2249,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       }
 
       @Override
+      @SuppressWarnings("unchecked")
       public Object get(Builder builder) {
         List result = new ArrayList();
         for (int i = 0; i < getRepeatedCount(builder); i++) {
@@ -2275,7 +2295,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       public Object getRepeatedRaw(Builder builder, int index) {
         return getRepeated(builder, index);
       }
-      
+
       @Override
       public void setRepeated(Builder builder, int index, Object value) {
         getMutableMapField(builder).getMutableList().set(index, coerceType((Message) value));
@@ -2676,7 +2696,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
 
     return (Extension<MessageType, T>) extension;
   }
-  
+
   protected static int computeStringSize(final int fieldNumber, final Object value) {
     if (value instanceof String) {
       return CodedOutputStream.computeStringSize(fieldNumber, (String) value);
@@ -2684,7 +2704,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       return CodedOutputStream.computeBytesSize(fieldNumber, (ByteString) value);
     }
   }
-  
+
   protected static int computeStringSizeNoTag(final Object value) {
     if (value instanceof String) {
       return CodedOutputStream.computeStringSizeNoTag((String) value);
@@ -2692,7 +2712,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       return CodedOutputStream.computeBytesSizeNoTag((ByteString) value);
     }
   }
-  
+
   protected static void writeString(
       CodedOutputStream output, final int fieldNumber, final Object value) throws IOException {
     if (value instanceof String) {
@@ -2701,7 +2721,7 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
       output.writeBytes(fieldNumber, (ByteString) value);
     }
   }
-  
+
   protected static void writeStringNoTag(
       CodedOutputStream output, final Object value) throws IOException {
     if (value instanceof String) {
@@ -2838,3 +2858,4 @@ public abstract class GeneratedMessageV3 extends AbstractMessage
     }
   }
 }
+

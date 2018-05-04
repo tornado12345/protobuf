@@ -33,11 +33,17 @@
 goog.setTestOnly();
 
 goog.require('goog.json');
+goog.require('goog.string');
+goog.require('goog.testing.PropertyReplacer');
 goog.require('goog.testing.asserts');
 goog.require('goog.userAgent');
 
 // CommonJS-LoadFromFile: google-protobuf jspb
 goog.require('jspb.Message');
+
+// CommonJS-LoadFromFile: test8_pb proto.jspb.exttest.nested
+goog.require('proto.jspb.exttest.nested.TestNestedExtensionsMessage');
+goog.require('proto.jspb.exttest.nested.TestOuterMessage');
 
 // CommonJS-LoadFromFile: test5_pb proto.jspb.exttest.beta
 goog.require('proto.jspb.exttest.beta.floatingStrField');
@@ -79,9 +85,17 @@ goog.require('proto.jspb.test.ExtensionMessage');
 goog.require('proto.jspb.test.TestExtensionsMessage');
 
 
-
-
 describe('Message test suite', function() {
+  var stubs = new goog.testing.PropertyReplacer();
+
+  beforeEach(function() {
+    stubs.set(jspb.Message, 'SERIALIZE_EMPTY_TRAILING_FIELDS', false);
+  });
+
+  afterEach(function() {
+    stubs.reset();
+  });
+
   it('testEmptyProto', function() {
     var empty1 = new proto.jspb.test.Empty([]);
     var empty2 = new proto.jspb.test.Empty([]);
@@ -269,12 +283,6 @@ describe('Message test suite', function() {
     assertFalse(response.hasEnumField());
   });
 
-  it('testMessageRegistration', /** @suppress {visibility} */ function() {
-    // goog.require(SomeResponse) will include its library, which will in
-    // turn add SomeResponse to the message registry.
-    assertEquals(jspb.Message.registry_['res'], proto.jspb.test.SomeResponse);
-  });
-
   it('testClearFields', function() {
     var data = ['str', true, [11], [[22], [33]], ['s1', 's2']];
     var foo = new proto.jspb.test.OptionalFields(data);
@@ -408,6 +416,18 @@ describe('Message test suite', function() {
         ['hi', {100: [{200: 'a'}]}], ['hi',,, {100: [{200: 'a'}]}]));
     assertTrue(jspb.Message.compareFields(
         ['hi',,, {100: [{200: 'a'}]}], ['hi', {100: [{200: 'a'}]}]));
+  });
+
+  it('testEqualsNonFinite', function() {
+    assertTrue(jspb.Message.compareFields(NaN, NaN));
+    assertTrue(jspb.Message.compareFields(NaN, 'NaN'));
+    assertTrue(jspb.Message.compareFields('NaN', NaN));
+    assertTrue(jspb.Message.compareFields(Infinity, Infinity));
+    assertTrue(jspb.Message.compareFields(Infinity, 'Infinity'));
+    assertTrue(jspb.Message.compareFields('-Infinity', -Infinity));
+    assertTrue(jspb.Message.compareFields([NaN], ['NaN']));
+    assertFalse(jspb.Message.compareFields(undefined, NaN));
+    assertFalse(jspb.Message.compareFields(NaN, undefined));
   });
 
   it('testToMap', function() {
@@ -586,6 +606,14 @@ describe('Message test suite', function() {
     assertNotUndefined(proto.jspb.exttest.beta.floatingStrField);
   });
 
+  it('testNestedExtensions', function() {
+    var extendable = new proto.jspb.exttest.nested.TestNestedExtensionsMessage();
+    var extension = new proto.jspb.exttest.nested.TestOuterMessage.NestedExtensionMessage(['s1']);
+    extendable.setExtension(proto.jspb.exttest.nested.TestOuterMessage.innerExtension, extension);
+    assertObjectEquals(extension,
+        extendable.getExtension(proto.jspb.exttest.nested.TestOuterMessage.innerExtension));
+  });
+
   it('testToObject_extendedObject', function() {
     var extension1 = new proto.jspb.test.IsExtension(['ext1field']);
     var extension2 = new proto.jspb.test.Simple1(['str', ['s1', 's2'], true]);
@@ -649,12 +677,7 @@ describe('Message test suite', function() {
 
   it('testInitialization_emptyArray', function() {
     var msg = new proto.jspb.test.HasExtensions([]);
-    if (jspb.Message.MINIMIZE_MEMORY_ALLOCATIONS) {
-      assertArrayEquals([], msg.toArray());
-    } else {
-      // Extension object is created past all regular fields.
-      assertArrayEquals([,,, {}], msg.toArray());
-    }
+    assertArrayEquals([], msg.toArray());
   });
 
   it('testInitialization_justExtensionObject', function() {
@@ -682,10 +705,11 @@ describe('Message test suite', function() {
      });
 
   it('testToObject_hasExtensionField', function() {
-    var data = new proto.jspb.test.HasExtensions(['str1', {100: ['ext1']}]);
+    var data = new proto.jspb.test.HasExtensions(['str1', {100: ['ext1'], 102: ''}]);
     var obj = data.toObject();
     assertEquals('str1', obj.str1);
     assertEquals('ext1', obj.extField.ext1);
+    assertEquals('', obj.str);
   });
 
   it('testGetExtension', function() {
@@ -1040,18 +1064,4 @@ describe('Message test suite', function() {
     assertNan(message.getDefaultDoubleField());
   });
 
-  // Verify that we can successfully use a field referring to a nested message
-  // from a different .proto file.
-  it('testForeignNestedMessage', function() {
-    var msg = new proto.jspb.test.ForeignNestedFieldMessage();
-    var nested = new proto.jspb.test.Deeply.Nested.Message();
-    nested.setCount(5);
-    msg.setDeeplyNestedMessage(nested);
-
-    // After a serialization-deserialization round trip we should get back the
-    // same data we started with.
-    var serialized = msg.serializeBinary();
-    var deserialized = proto.jspb.test.ForeignNestedFieldMessage.deserializeBinary(serialized);
-    assertEquals(5, deserialized.getDeeplyNestedMessage().getCount());
-  });
 });

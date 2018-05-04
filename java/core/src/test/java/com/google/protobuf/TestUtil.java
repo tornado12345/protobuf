@@ -231,6 +231,7 @@ import protobuf_unittest.UnittestProto.TestAllTypesOrBuilder;
 import protobuf_unittest.UnittestProto.TestOneof2;
 import protobuf_unittest.UnittestProto.TestPackedExtensions;
 import protobuf_unittest.UnittestProto.TestPackedTypes;
+import protobuf_unittest.UnittestProto.TestRequired;
 import protobuf_unittest.UnittestProto.TestUnpackedTypes;
 import java.io.File;
 import java.io.IOException;
@@ -251,6 +252,11 @@ import junit.framework.Assert;
  */
 public final class TestUtil {
   private TestUtil() {}
+
+  public static final TestRequired TEST_REQUIRED_UNINITIALIZED =
+      TestRequired.newBuilder().setA(1).buildPartial();
+  public static final TestRequired TEST_REQUIRED_INITIALIZED =
+      TestRequired.newBuilder().setA(1).setB(2).setC(3).build();
 
   /** Helper to convert a String to ByteString. */
   static ByteString toBytes(String str) {
@@ -2602,6 +2608,9 @@ public final class TestUtil {
       case FOO_CORD:
         Assert.assertTrue(message.hasFooCord());
         break;
+      case FOO_STRING_PIECE:
+        Assert.assertTrue(message.hasFooStringPiece());
+        break;
       case FOO_BYTES:
         Assert.assertTrue(message.hasFooBytes());
         break;
@@ -2619,6 +2628,8 @@ public final class TestUtil {
         break;
       case FOO_NOT_SET:
         break;
+      default:
+        // TODO(b/18683919): go/enum-switch-lsc
     }
   }
 

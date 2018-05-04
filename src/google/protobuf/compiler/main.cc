@@ -39,12 +39,11 @@
 #endif  // ! OPENSOURCE_PROTOBUF_CPP_BOOTSTRAP
 
 #ifndef OPENSOURCE_PROTOBUF_CPP_BOOTSTRAP
-#include <google/protobuf/compiler/javanano/javanano_generator.h>
+#include <google/protobuf/compiler/csharp/csharp_generator.h>
+#include <google/protobuf/compiler/js/js_generator.h>
+#include <google/protobuf/compiler/objectivec/objectivec_generator.h>
 #include <google/protobuf/compiler/php/php_generator.h>
 #include <google/protobuf/compiler/ruby/ruby_generator.h>
-#include <google/protobuf/compiler/csharp/csharp_generator.h>
-#include <google/protobuf/compiler/objectivec/objectivec_generator.h>
-#include <google/protobuf/compiler/js/js_generator.h>
 #endif  // ! OPENSOURCE_PROTOBUF_CPP_BOOTSTRAP
 
 int main(int argc, char* argv[]) {
@@ -60,7 +59,7 @@ int main(int argc, char* argv[]) {
 #ifndef OPENSOURCE_PROTOBUF_CPP_BOOTSTRAP
   // Proto2 Java
   google::protobuf::compiler::java::JavaGenerator java_generator;
-  cli.RegisterGenerator("--java_out", &java_generator,
+  cli.RegisterGenerator("--java_out", "--java_opt", &java_generator,
                         "Generate Java source file.");
 #endif  // !OPENSOURCE_PROTOBUF_CPP_BOOTSTRAP
 
@@ -70,11 +69,6 @@ int main(int argc, char* argv[]) {
   google::protobuf::compiler::python::Generator py_generator;
   cli.RegisterGenerator("--python_out", &py_generator,
                         "Generate Python source file.");
-
-  // Java Nano
-  google::protobuf::compiler::javanano::JavaNanoGenerator javanano_generator;
-  cli.RegisterGenerator("--javanano_out", &javanano_generator,
-                        "Generate Java Nano source file.");
 
   // PHP
   google::protobuf::compiler::php::Generator php_generator;

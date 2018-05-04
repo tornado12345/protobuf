@@ -1,2 +1,2 @@
-Recommended.JsonInput.FieldNameWithDoubleUnderscores.JsonOutput
-Required.JsonInput.FieldNameInSnakeCase.JsonOutput
+Recommended.Proto3.JsonInput.BytesFieldBase64Url.JsonOutput
+Recommended.Proto3.JsonInput.BytesFieldBase64Url.ProtobufOutput
