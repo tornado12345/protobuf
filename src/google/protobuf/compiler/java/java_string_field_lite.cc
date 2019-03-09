@@ -47,6 +47,7 @@
 #include <google/protobuf/wire_format.h>
 #include <google/protobuf/stubs/strutil.h>
 
+
 namespace google {
 namespace protobuf {
 namespace compiler {
@@ -58,11 +59,10 @@ using internal::WireFormatLite;
 namespace {
 
 void SetPrimitiveVariables(const FieldDescriptor* descriptor,
-                           int messageBitIndex,
-                           int builderBitIndex,
+                           int messageBitIndex, int builderBitIndex,
                            const FieldGeneratorInfo* info,
                            ClassNameResolver* name_resolver,
-                           std::map<string, string>* variables) {
+                           std::map<std::string, std::string>* variables) {
   SetCommonFieldVariables(descriptor, info, variables);
 
   (*variables)["empty_list"] =
@@ -73,8 +73,8 @@ void SetPrimitiveVariables(const FieldDescriptor* descriptor,
       "= " + ImmutableDefaultValue(descriptor, name_resolver);
   (*variables)["capitalized_type"] = "java.lang.String";
   (*variables)["tag"] =
-      SimpleItoa(static_cast<int32>(WireFormat::MakeTag(descriptor)));
-  (*variables)["tag_size"] = SimpleItoa(
+      StrCat(static_cast<int32>(WireFormat::MakeTag(descriptor)));
+  (*variables)["tag_size"] = StrCat(
       WireFormat::TagSize(descriptor->number(), GetType(descriptor)));
   (*variables)["null_check"] =
       "  if (value == null) {\n"
@@ -119,15 +119,13 @@ void SetPrimitiveVariables(const FieldDescriptor* descriptor,
 
 // ===================================================================
 
-ImmutableStringFieldLiteGenerator::
-ImmutableStringFieldLiteGenerator(const FieldDescriptor* descriptor,
-                              int messageBitIndex,
-                              int builderBitIndex,
-                              Context* context)
-  : descriptor_(descriptor), messageBitIndex_(messageBitIndex),
-    builderBitIndex_(builderBitIndex), context_(context),
-    name_resolver_(context->GetNameResolver()) {
-  SetPrimitiveVariables(descriptor, messageBitIndex, builderBitIndex,
+ImmutableStringFieldLiteGenerator::ImmutableStringFieldLiteGenerator(
+    const FieldDescriptor* descriptor, int messageBitIndex, Context* context)
+    : descriptor_(descriptor),
+      messageBitIndex_(messageBitIndex),
+      context_(context),
+      name_resolver_(context->GetNameResolver()) {
+  SetPrimitiveVariables(descriptor, messageBitIndex, 0,
                         context->GetFieldGeneratorInfo(descriptor),
                         name_resolver_, &variables_);
 }
@@ -135,11 +133,7 @@ ImmutableStringFieldLiteGenerator(const FieldDescriptor* descriptor,
 ImmutableStringFieldLiteGenerator::~ImmutableStringFieldLiteGenerator() {}
 
 int ImmutableStringFieldLiteGenerator::GetNumBitsForMessage() const {
-  return 1;
-}
-
-int ImmutableStringFieldLiteGenerator::GetNumBitsForBuilder() const {
-  return 0;
+  return SupportFieldPresence(descriptor_->file()) ? 1 : 0;
 }
 
 // A note about how strings are handled. In the SPEED and CODE_SIZE runtimes,
@@ -397,19 +391,15 @@ GenerateHashCode(io::Printer* printer) const {
     "hash = (53 * hash) + get$capitalized_name$().hashCode();\n");
 }
 
-string ImmutableStringFieldLiteGenerator::GetBoxedType() const {
+std::string ImmutableStringFieldLiteGenerator::GetBoxedType() const {
   return "java.lang.String";
 }
 
 // ===================================================================
 
-ImmutableStringOneofFieldLiteGenerator::
-ImmutableStringOneofFieldLiteGenerator(const FieldDescriptor* descriptor,
-                                   int messageBitIndex,
-                                   int builderBitIndex,
-                                   Context* context)
-    : ImmutableStringFieldLiteGenerator(
-          descriptor, messageBitIndex, builderBitIndex, context) {
+ImmutableStringOneofFieldLiteGenerator::ImmutableStringOneofFieldLiteGenerator(
+    const FieldDescriptor* descriptor, int messageBitIndex, Context* context)
+    : ImmutableStringFieldLiteGenerator(descriptor, messageBitIndex, context) {
   const OneofGeneratorInfo* info =
       context->GetOneofGeneratorInfo(descriptor->containing_oneof());
   SetCommonOneofVariables(descriptor, info, &variables_);
@@ -603,14 +593,14 @@ GenerateSerializedSizeCode(io::Printer* printer) const {
 // ===================================================================
 
 RepeatedImmutableStringFieldLiteGenerator::
-RepeatedImmutableStringFieldLiteGenerator(const FieldDescriptor* descriptor,
-                                      int messageBitIndex,
-                                      int builderBitIndex,
-                                      Context* context)
-  : descriptor_(descriptor), messageBitIndex_(messageBitIndex),
-    builderBitIndex_(builderBitIndex), context_(context),
-    name_resolver_(context->GetNameResolver()) {
-  SetPrimitiveVariables(descriptor, messageBitIndex, builderBitIndex,
+    RepeatedImmutableStringFieldLiteGenerator(const FieldDescriptor* descriptor,
+                                              int messageBitIndex,
+                                              Context* context)
+    : descriptor_(descriptor),
+      messageBitIndex_(messageBitIndex),
+      context_(context),
+      name_resolver_(context->GetNameResolver()) {
+  SetPrimitiveVariables(descriptor, messageBitIndex, 0,
                         context->GetFieldGeneratorInfo(descriptor),
                         name_resolver_, &variables_);
 }
@@ -619,10 +609,6 @@ RepeatedImmutableStringFieldLiteGenerator::
 ~RepeatedImmutableStringFieldLiteGenerator() {}
 
 int RepeatedImmutableStringFieldLiteGenerator::GetNumBitsForMessage() const {
-  return 0;
-}
-
-int RepeatedImmutableStringFieldLiteGenerator::GetNumBitsForBuilder() const {
   return 0;
 }
 
@@ -925,7 +911,7 @@ GenerateHashCode(io::Printer* printer) const {
     "}\n");
 }
 
-string RepeatedImmutableStringFieldLiteGenerator::GetBoxedType() const {
+std::string RepeatedImmutableStringFieldLiteGenerator::GetBoxedType() const {
   return "java.lang.String";
 }
 

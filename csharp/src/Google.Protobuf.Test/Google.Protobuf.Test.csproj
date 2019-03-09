@@ -18,7 +18,7 @@
     <PackageReference Include="NUnit3TestAdapter" Version="3.9.0" />
   </ItemGroup>
 
-  <!-- 
+  <!--
     - Override target frameworks on non-Windows to just .NET Core
     - Doing this conditionally in the initial PropertyGroup confuses
     - Visual Studio.
@@ -26,5 +26,9 @@
   <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
     <TargetFrameworks>netcoreapp1.0</TargetFrameworks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="testprotos.pb" />
+  </ItemGroup>
 
 </Project>

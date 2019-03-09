@@ -61,7 +61,7 @@ namespace protobuf {
 namespace {
 
 // Shorthand to get a FieldDescriptor for a field of unittest::TestAllTypes.
-const FieldDescriptor* F(const string& name) {
+const FieldDescriptor* F(const std::string& name) {
   const FieldDescriptor* result =
     unittest::TestAllTypes::descriptor()->FindFieldByName(name);
   GOOGLE_CHECK(result != NULL);
@@ -107,24 +107,26 @@ TEST(GeneratedMessageReflectionTest, Accessors) {
 }
 
 TEST(GeneratedMessageReflectionTest, GetStringReference) {
-  // Test that GetStringReference() returns the underlying string when it is
-  // a normal string field.
+  // Test that GetStringReference() returns the underlying string when it
+  // is a normal string field.
   unittest::TestAllTypes message;
   message.set_optional_string("foo");
   message.add_repeated_string("foo");
 
   const Reflection* reflection = message.GetReflection();
-  string scratch;
+  std::string scratch;
 
-  EXPECT_EQ(&message.optional_string(),
+  EXPECT_EQ(
+      &message.optional_string(),
       &reflection->GetStringReference(message, F("optional_string"), &scratch))
-    << "For simple string fields, GetStringReference() should return a "
-       "reference to the underlying string.";
+      << "For simple string fields, GetStringReference() should return a "
+         "reference to the underlying string.";
   EXPECT_EQ(&message.repeated_string(0),
-      &reflection->GetRepeatedStringReference(message, F("repeated_string"),
-                                              0, &scratch))
-    << "For simple string fields, GetRepeatedStringReference() should return "
-       "a reference to the underlying string.";
+            &reflection->GetRepeatedStringReference(
+                message, F("repeated_string"), 0, &scratch))
+      << "For simple string fields, GetRepeatedStringReference() should "
+         "return "
+         "a reference to the underlying string.";
 }
 
 
@@ -520,9 +522,9 @@ TEST(GeneratedMessageReflectionTest, SetAllocatedMessageTest) {
 TEST(GeneratedMessageReflectionTest, SetAllocatedMessageOnArenaTest) {
   unittest::TestAllTypes from_message1;
   unittest::TestAllTypes from_message2;
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestAllTypes* to_message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestAllTypes>(&arena);
+      Arena::CreateMessage<unittest::TestAllTypes>(&arena);
   TestUtil::ReflectionTester reflection_tester(
     unittest::TestAllTypes::descriptor());
   reflection_tester.SetAllFieldsViaReflection(&from_message1);
@@ -586,9 +588,9 @@ TEST(GeneratedMessageReflectionTest, SetAllocatedExtensionMessageTest) {
 }
 
 TEST(GeneratedMessageReflectionTest, SetAllocatedExtensionMessageOnArenaTest) {
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestAllExtensions* to_message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestAllExtensions>(&arena);
+      Arena::CreateMessage<unittest::TestAllExtensions>(&arena);
   unittest::TestAllExtensions from_message1;
   unittest::TestAllExtensions from_message2;
   TestUtil::ReflectionTester reflection_tester(
@@ -798,9 +800,9 @@ TEST(GeneratedMessageReflectionTest, SetAllocatedOneofMessageTest) {
 TEST(GeneratedMessageReflectionTest, SetAllocatedOneofMessageOnArenaTest) {
   unittest::TestOneof2 from_message1;
   unittest::TestOneof2 from_message2;
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestOneof2* to_message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestOneof2>(&arena);
+      Arena::CreateMessage<unittest::TestOneof2>(&arena);
   const Descriptor* descriptor = unittest::TestOneof2::descriptor();
   const Reflection* reflection = to_message->GetReflection();
 
@@ -921,9 +923,9 @@ TEST(GeneratedMessageReflectionTest, ReleaseOneofMessageTest) {
 }
 
 TEST(GeneratedMessageReflectionTest, ArenaReleaseMessageTest) {
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestAllTypes* message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestAllTypes>(&arena);
+      Arena::CreateMessage<unittest::TestAllTypes>(&arena);
   TestUtil::ReflectionTester reflection_tester(
       unittest::TestAllTypes::descriptor());
 
@@ -945,9 +947,9 @@ TEST(GeneratedMessageReflectionTest, ArenaReleaseMessageTest) {
 }
 
 TEST(GeneratedMessageReflectionTest, ArenaReleaseExtensionMessageTest) {
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestAllExtensions* message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestAllExtensions>(&arena);
+      Arena::CreateMessage<unittest::TestAllExtensions>(&arena);
   TestUtil::ReflectionTester reflection_tester(
       unittest::TestAllExtensions::descriptor());
 
@@ -969,9 +971,9 @@ TEST(GeneratedMessageReflectionTest, ArenaReleaseExtensionMessageTest) {
 }
 
 TEST(GeneratedMessageReflectionTest, ArenaReleaseOneofMessageTest) {
-  ::google::protobuf::Arena arena;
+  Arena arena;
   unittest::TestOneof2* message =
-      ::google::protobuf::Arena::CreateMessage<unittest::TestOneof2>(&arena);
+      Arena::CreateMessage<unittest::TestOneof2>(&arena);
   TestUtil::ReflectionTester::SetOneofViaReflection(message);
 
   const Descriptor* descriptor = unittest::TestOneof2::descriptor();

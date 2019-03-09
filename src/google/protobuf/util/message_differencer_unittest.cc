@@ -35,6 +35,7 @@
 // TODO(ksroka): Move some of these tests to field_comparator_test.cc.
 
 #include <algorithm>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -64,9 +65,9 @@ namespace protobuf {
 namespace {
 
 
-const FieldDescriptor* GetFieldDescriptor(
-    const Message& message, const string& field_name) {
-  std::vector<string> field_path =
+const FieldDescriptor* GetFieldDescriptor(const Message& message,
+                                          const std::string& field_name) {
+  std::vector<std::string> field_path =
       Split(field_name, ".", true);
   const Descriptor* descriptor = message.GetDescriptor();
   const FieldDescriptor* field = NULL;
@@ -906,8 +907,9 @@ TEST(MessageDifferencerTest, SpecifiedFieldsEqualityAllShuffledTest) {
   msg1.GetReflection()->ListFields(msg1, &fields1);
   msg2.GetReflection()->ListFields(msg2, &fields2);
 
-  std::random_shuffle(fields1.begin(), fields1.end());
-  std::random_shuffle(fields2.begin(), fields2.end());
+  std::default_random_engine rng;
+  std::shuffle(fields1.begin(), fields1.end(), rng);
+  std::shuffle(fields2.begin(), fields2.end(), rng);
 
   util::MessageDifferencer differencer;
   EXPECT_TRUE(differencer.CompareWithFields(msg1, msg2, fields1, fields2));
@@ -1045,6 +1047,193 @@ TEST(MessageDifferencerTest,
       util::MessageDifferencer::EQUIVALENT);
   EXPECT_FALSE(differencer.Compare(msg1, msg2));
   EXPECT_TRUE(differencer.CompareWithFields(msg1, msg2, fields1, fields2));
+}
+
+TEST(MessageDifferencerTest, RepeatedFieldSmartListTest) {
+  // Create the testing protos
+  protobuf_unittest::TestDiffMessage msg1;
+  protobuf_unittest::TestDiffMessage msg2;
+
+  msg1.add_rv(1);
+  msg1.add_rv(2);
+  msg1.add_rv(3);
+  msg1.add_rv(9);
+  msg1.add_rv(4);
+  msg1.add_rv(5);
+  msg1.add_rv(7);
+  msg1.add_rv(2);
+  msg2.add_rv(9);
+  msg2.add_rv(0);
+  msg2.add_rv(2);
+  msg2.add_rv(7);
+  msg2.add_rv(3);
+  msg2.add_rv(4);
+  msg2.add_rv(5);
+  msg2.add_rv(6);
+  msg2.add_rv(2);
+  // Compare
+  // a: 1,      2,    3, 9, 4, 5, 7,   2
+  // b:   9, 0, 2, 7, 3,    4, 5,   6, 2
+  std::string diff_report;
+  util::MessageDifferencer differencer;
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_LIST);
+  EXPECT_FALSE(differencer.Compare(msg1, msg2));
+  EXPECT_EQ("deleted: rv[0]: 1\n"
+            "added: rv[0]: 9\n"
+            "added: rv[1]: 0\n"
+            "moved: rv[1] -> rv[2] : 2\n"
+            "added: rv[3]: 7\n"
+            "moved: rv[2] -> rv[4] : 3\n"
+            "deleted: rv[3]: 9\n"
+            "moved: rv[4] -> rv[5] : 4\n"
+            "moved: rv[5] -> rv[6] : 5\n"
+            "deleted: rv[6]: 7\n"
+            "added: rv[7]: 6\n"
+            "moved: rv[7] -> rv[8] : 2\n", diff_report);
+
+  // Compare two sub messages
+  // a: 1, 2, 3,    4, 5
+  // b:    2,    6, 4,
+  msg1.Clear();
+  msg2.Clear();
+  msg1.add_rm()->set_a(1);
+  msg1.add_rm()->set_a(2);
+  msg1.add_rm()->set_a(3);
+  msg1.add_rm()->set_a(4);
+  msg1.add_rm()->set_a(5);
+  msg2.add_rm()->set_a(2);
+  msg2.add_rm()->set_a(6);
+  msg2.add_rm()->set_a(4);
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_LIST);
+  EXPECT_FALSE(differencer.Compare(msg1, msg2));
+  EXPECT_EQ("deleted: rm[0]: { a: 1 }\n"
+            "moved: rm[1] -> rm[0] : { a: 2 }\n"
+            "deleted: rm[2]: { a: 3 }\n"
+            "added: rm[1]: { a: 6 }\n"
+            "moved: rm[3] -> rm[2] : { a: 4 }\n"
+            "deleted: rm[4]: { a: 5 }\n", diff_report);
+}
+
+TEST(MessageDifferencerTest, RepeatedFieldSmartSetTest) {
+  // Create the testing protos
+  protobuf_unittest::TestDiffMessage msg1;
+  protobuf_unittest::TestDiffMessage msg2;
+  protobuf_unittest::TestField elem1_1, elem2_1, elem3_1;
+  protobuf_unittest::TestField elem1_2, elem2_2, elem3_2;
+
+  // Only one field is different for each pair of elememts
+  elem1_1.set_a(1);  elem1_2.set_a(0);
+  elem1_1.set_b(1);  elem1_2.set_b(1);
+  elem1_1.set_c(1);  elem1_2.set_c(1);
+  elem2_1.set_a(2);  elem2_2.set_a(2);
+  elem2_1.set_b(2);  elem2_2.set_b(0);
+  elem2_1.set_c(2);  elem2_2.set_c(2);
+  elem3_1.set_a(3);  elem3_2.set_a(3);
+  elem3_1.set_b(3);  elem3_2.set_b(0);
+  elem3_1.set_c(3);  elem3_2.set_c(3);
+
+  *msg1.add_rm() = elem1_1;
+  *msg1.add_rm() = elem2_1;
+  *msg1.add_rm() = elem3_1;
+  // Change the order of those elements for the second message.
+  *msg2.add_rm() = elem3_2;
+  *msg2.add_rm() = elem1_2;
+  *msg2.add_rm() = elem2_2;
+
+  std::string diff_report;
+  util::MessageDifferencer differencer;
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_SET);
+  EXPECT_FALSE(differencer.Compare(msg1, msg2));
+  EXPECT_EQ("modified: rm[0].a -> rm[1].a: 1 -> 0\n"
+            "modified: rm[1].b -> rm[2].b: 2 -> 0\n"
+            "modified: rm[2].b -> rm[0].b: 3 -> 0\n", diff_report);
+}
+
+TEST(MessageDifferencerTest, RepeatedFieldSmartSet_MultipleMatches) {
+  // Create the testing protos
+  protobuf_unittest::TestDiffMessage msg1;
+  protobuf_unittest::TestDiffMessage msg2;
+  protobuf_unittest::TestField elem1_1, elem2_1, elem3_1;
+  protobuf_unittest::TestField elem2_2, elem3_2;
+
+  // Only one field is different for each pair of elememts
+  elem1_1.set_a(1);
+  elem1_1.set_b(1);
+  elem1_1.set_c(1);
+  elem2_1.set_a(2);  elem2_2.set_a(2);
+  elem2_1.set_b(2);  elem2_2.set_b(0);
+  elem2_1.set_c(2);  elem2_2.set_c(2);
+  elem3_1.set_a(3);  elem3_2.set_a(3);
+  elem3_1.set_b(3);  elem3_2.set_b(0);
+  elem3_1.set_c(3);  elem3_2.set_c(3);
+
+
+
+  // In this testcase, elem1_1 will match with elem2_2 first and then get
+  // reverted because elem2_1 matches with elem2_2 later.
+  *msg1.add_rm() = elem1_1;
+  *msg1.add_rm() = elem2_1;
+  *msg1.add_rm() = elem3_1;
+  *msg2.add_rm() = elem2_2;
+  *msg2.add_rm() = elem3_2;
+
+  std::string diff_report;
+  util::MessageDifferencer differencer;
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_SET);
+  EXPECT_FALSE(differencer.Compare(msg1, msg2));
+  EXPECT_EQ("modified: rm[1].b -> rm[0].b: 2 -> 0\n"
+            "modified: rm[2].b -> rm[1].b: 3 -> 0\n"
+            "deleted: rm[0]: { c: 1 a: 1 b: 1 }\n", diff_report);
+}
+
+TEST(MessageDifferencerTest, RepeatedFieldSmartSet_MultipleMatchesNoReporter) {
+  protobuf_unittest::TestDiffMessage msg1;
+  protobuf_unittest::TestDiffMessage msg2;
+  protobuf_unittest::TestField elem1, elem2, elem3, elem4;
+  elem1.set_a(1);
+  elem2.set_a(2);
+  elem3.set_a(3);
+  elem4.set_a(4);
+
+  *msg1.add_rm() = elem1;
+  *msg1.add_rm() = elem2;
+  *msg1.add_rm() = elem3;
+  *msg2.add_rm() = elem2;
+  *msg2.add_rm() = elem3;
+  *msg2.add_rm() = elem4;
+
+  util::MessageDifferencer differencer;
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_SET);
+  EXPECT_FALSE(differencer.Compare(msg1, msg2));
+}
+
+TEST(MessageDifferencerTest, RepeatedFieldSmartSet_NonMessageTypeTest) {
+  // Create the testing protos
+  protobuf_unittest::TestDiffMessage msg1;
+  protobuf_unittest::TestDiffMessage msg2;
+
+  // Create 3 elements, but in different order.
+  msg1.add_rw("b");  msg2.add_rw("a");
+  msg1.add_rw("x");  msg2.add_rw("x");
+  msg1.add_rw("a");  msg2.add_rw("b");
+
+  std::string diff_report;
+  util::MessageDifferencer differencer;
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.set_repeated_field_comparison(
+      util::MessageDifferencer::AS_SMART_SET);
+  EXPECT_TRUE(differencer.Compare(msg1, msg2));
+  EXPECT_EQ("moved: rw[0] -> rw[2] : \"b\"\n"
+            "moved: rw[2] -> rw[0] : \"a\"\n", diff_report);
 }
 
 TEST(MessageDifferencerTest, RepeatedFieldSetTest_SetOfSet) {
@@ -1327,7 +1516,7 @@ TEST(MessageDifferencerTest, RepeatedFieldMapTest_MultipleFieldsAsKey) {
   item->add_ra(6);
   item->add_ra(5);
   item->set_b("world");
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   EXPECT_FALSE(differencer.Compare(msg1, msg2));
   EXPECT_EQ(
@@ -1410,7 +1599,7 @@ TEST(MessageDifferencerTest, RepeatedFieldMapTest_MultipleFieldPathsAsKey) {
   item->mutable_m()->add_rc(6);
   item->mutable_m()->add_rc(5);
   item->set_b("world");
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   EXPECT_FALSE(differencer.Compare(msg1, msg2));
   EXPECT_EQ(
@@ -1439,7 +1628,7 @@ TEST(MessageDifferencerTest, RepeatedFieldMapTest_IgnoredKeyFields) {
   key_fields.push_back(GetFieldDescriptor(msg1, "item.ra"));
   differencer.TreatAsMapWithMultipleFieldsAsKey(
       GetFieldDescriptor(msg1, "item"), key_fields);
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   EXPECT_FALSE(differencer.Compare(msg1, msg2));
   EXPECT_EQ(
@@ -1480,7 +1669,7 @@ class TestIgnorer : public util::MessageDifferencer::IgnoreCriteria {
       const FieldDescriptor* field,
       const std::vector<util::MessageDifferencer::SpecificField>&
           parent_fields) {
-    string name = "";
+    std::string name = "";
     for (int i = 0; i < parent_fields.size(); ++i) {
       name += parent_fields[i].field->name() + ".";
     }
@@ -1559,7 +1748,7 @@ TEST(MessageDifferencerTest, RepeatedFieldMapTest_CustomMapKeyComparator) {
   ValueProductMapKeyComparator key_comparator;
   differencer.TreatAsMapUsingKeyComparator(
       GetFieldDescriptor(msg1, "item"), &key_comparator);
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   // Though the above two messages have different values for item.ra, they
   // are regarded as having the same key because 6 * 35 == 10 * 21. That's
@@ -1605,7 +1794,7 @@ TEST(MessageDifferencerTest, RepeatedFieldMapTest_CustomIndexMapKeyComparator) {
   OffsetByOneMapKeyComparator key_comparator;
   differencer.TreatAsMapUsingKeyComparator(GetFieldDescriptor(msg1, "item"),
                                            &key_comparator);
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   // With the offset by one comparator msg1.item[0] should be compared to
   // msg2.item[1] and thus be moved, msg2.item[0] should be marked as added.
@@ -1936,6 +2125,45 @@ TEST(MessageDifferencerTest, IgnoreField_TrumpsCompareWithFields) {
   EXPECT_TRUE(differencer.CompareWithFields(msg1, msg2, fields, fields));
 }
 
+TEST(MessageDifferencerTest, IgnoreField_SetReportIgnoresFalse) {
+  protobuf_unittest::TestField msg1;
+  protobuf_unittest::TestField msg2;
+
+  msg1.set_a(1);
+  msg1.set_b(2);
+  msg1.set_c(3);
+  msg1.add_rc(1);
+  msg1.add_rc(2);
+
+  msg2.set_a(1);
+  msg2.set_b(1);
+
+  const FieldDescriptor* a = GetFieldDescriptor(msg1, "a");
+  const FieldDescriptor* b = GetFieldDescriptor(msg1, "b");
+  const FieldDescriptor* c = GetFieldDescriptor(msg1, "c");
+  const FieldDescriptor* rc = GetFieldDescriptor(msg1, "rc");
+
+  std::vector<const FieldDescriptor*> fields;
+  fields.push_back(a);
+  fields.push_back(b);
+  fields.push_back(c);
+  fields.push_back(rc);
+
+  std::string diff_report;
+  util::MessageDifferencer differencer;
+  differencer.set_report_ignores(false);
+  differencer.set_report_matches(true);
+  differencer.ReportDifferencesToString(&diff_report);
+  differencer.IgnoreField(c);
+  differencer.IgnoreField(rc);
+  differencer.set_scope(util::MessageDifferencer::FULL);
+  EXPECT_FALSE(differencer.CompareWithFields(msg1, msg2, fields, fields));
+
+  EXPECT_EQ(diff_report,
+            "matched: a : 1\n"
+            "modified: b: 2 -> 1\n");
+}
+
 
 // Test class to save a copy of the last field_context.parent_fields() vector
 // passed to the comparison function.
@@ -1943,12 +2171,11 @@ class ParentSavingFieldComparator : public util::FieldComparator {
  public:
   ParentSavingFieldComparator() {}
 
-  virtual ComparisonResult Compare(
-      const google::protobuf::Message& message_1,
-      const google::protobuf::Message& message_2,
-      const google::protobuf::FieldDescriptor* field,
-      int index_1, int index_2,
-      const google::protobuf::util::FieldContext* field_context) {
+  virtual ComparisonResult Compare(const Message& message_1,
+                                   const Message& message_2,
+                                   const FieldDescriptor* field, int index_1,
+                                   int index_2,
+                                   const util::FieldContext* field_context) {
     if (field_context)
       parent_fields_ = *(field_context->parent_fields());
     if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE) {
@@ -1958,12 +2185,12 @@ class ParentSavingFieldComparator : public util::FieldComparator {
     }
   }
 
-  std::vector<google::protobuf::util::MessageDifferencer::SpecificField> parent_fields() {
+  std::vector<util::MessageDifferencer::SpecificField> parent_fields() {
     return parent_fields_;
   }
 
  private:
-  std::vector<google::protobuf::util::MessageDifferencer::SpecificField> parent_fields_;
+  std::vector<util::MessageDifferencer::SpecificField> parent_fields_;
 };
 
 // Tests if MessageDifferencer sends the parent fields in the FieldContext
@@ -2024,8 +2251,8 @@ class ComparisonTest : public testing::Test {
     }
   }
 
-  string Run(const Message& msg1, const Message& msg2) {
-    string output;
+  std::string Run(const Message& msg1, const Message& msg2) {
+    std::string output;
 
     // Setup the comparison.
     util::MessageDifferencer differencer;
@@ -2044,25 +2271,15 @@ class ComparisonTest : public testing::Test {
     return output;
   }
 
-  string Run() {
-    return Run(proto1_, proto2_);
-  }
+  std::string Run() { return Run(proto1_, proto2_); }
 
-  string RunOrder() {
-    return Run(orderings_proto1_, orderings_proto2_);
-  }
+  std::string RunOrder() { return Run(orderings_proto1_, orderings_proto2_); }
 
-  string RunEx() {
-    return Run(proto1ex_, proto2ex_);
-  }
+  std::string RunEx() { return Run(proto1ex_, proto2ex_); }
 
-  string RunDiff() {
-    return Run(proto1diff_, proto2diff_);
-  }
+  std::string RunDiff() { return Run(proto1diff_, proto2diff_); }
 
-  string RunUn() {
-    return Run(empty1_, empty2_);
-  }
+  std::string RunUn() { return Run(empty1_, empty2_); }
 
   void use_equivalency() {
     use_equivalency_ = true;
@@ -2072,18 +2289,14 @@ class ComparisonTest : public testing::Test {
     repeated_field_as_set_ = true;
   }
 
-  void field_as_set(const string& field) {
-    set_field_ = field;
-  }
+  void field_as_set(const std::string& field) { set_field_ = field; }
 
-  void field_as_map(const string& field, const string& key) {
+  void field_as_map(const string& field, const std::string& key) {
     map_field_ = field;
     map_key_   = key;
   }
 
-  void ignore_field(const string& field) {
-    ignored_field_ = field;
-  }
+  void ignore_field(const std::string& field) { ignored_field_ = field; }
 
   unittest::TestAllTypes proto1_;
   unittest::TestAllTypes proto2_;
@@ -2109,10 +2322,10 @@ class ComparisonTest : public testing::Test {
   bool use_equivalency_;
   bool repeated_field_as_set_;
 
-  string set_field_;
-  string map_field_;
-  string map_key_;
-  string ignored_field_;
+  std::string set_field_;
+  std::string map_field_;
+  std::string map_key_;
+  std::string ignored_field_;
 };
 
 // Basic tests.
@@ -2864,11 +3077,11 @@ TEST_F(ComparisonTest, EquivalentIgnoresUnknown) {
 }
 
 TEST_F(ComparisonTest, MapTest) {
-  Map<string, string>& map1 = *map_proto1_.mutable_map_string_string();
+  Map<string, std::string>& map1 = *map_proto1_.mutable_map_string_string();
   map1["key1"] = "1";
   map1["key2"] = "2";
   map1["key3"] = "3";
-  Map<string, string>& map2 = *map_proto2_.mutable_map_string_string();
+  Map<string, std::string>& map2 = *map_proto2_.mutable_map_string_string();
   map2["key3"] = "0";
   map2["key2"] = "2";
   map2["key1"] = "1";
@@ -2878,11 +3091,11 @@ TEST_F(ComparisonTest, MapTest) {
 }
 
 TEST_F(ComparisonTest, MapIgnoreKeyTest) {
-  Map<string, string>& map1 = *map_proto1_.mutable_map_string_string();
+  Map<string, std::string>& map1 = *map_proto1_.mutable_map_string_string();
   map1["key1"] = "1";
   map1["key2"] = "2";
   map1["key3"] = "3";
-  Map<string, string>& map2 = *map_proto2_.mutable_map_string_string();
+  Map<string, std::string>& map2 = *map_proto2_.mutable_map_string_string();
   map2["key4"] = "2";
   map2["key5"] = "3";
   map2["key6"] = "1";
@@ -2894,7 +3107,7 @@ TEST_F(ComparisonTest, MapIgnoreKeyTest) {
 }
 
 TEST_F(ComparisonTest, MapRoundTripSyncTest) {
-  google::protobuf::TextFormat::Parser parser;
+  TextFormat::Parser parser;
   unittest::TestMap map_reflection1;
 
   // By setting via reflection, data exists in repeated field.
@@ -2910,11 +3123,11 @@ TEST_F(ComparisonTest, MapRoundTripSyncTest) {
 }
 
 TEST_F(ComparisonTest, MapEntryPartialTest) {
-  google::protobuf::TextFormat::Parser parser;
+  TextFormat::Parser parser;
   unittest::TestMap map1;
   unittest::TestMap map2;
 
-  string output;
+  std::string output;
   util::MessageDifferencer differencer;
   differencer.set_scope(util::MessageDifferencer::PARTIAL);
   differencer.ReportDifferencesToString(&output);
@@ -2932,7 +3145,7 @@ TEST_F(ComparisonTest, MapEntryPartialTest) {
 }
 
 TEST_F(ComparisonTest, MapEntryPartialEmptyKeyTest) {
-  google::protobuf::TextFormat::Parser parser;
+  TextFormat::Parser parser;
   unittest::TestMap map1;
   unittest::TestMap map2;
   ASSERT_TRUE(parser.ParseFromString("map_int32_foreign_message {}", &map1));
@@ -2942,6 +3155,22 @@ TEST_F(ComparisonTest, MapEntryPartialEmptyKeyTest) {
   util::MessageDifferencer differencer;
   differencer.set_scope(util::MessageDifferencer::PARTIAL);
   EXPECT_TRUE(differencer.Compare(map1, map2));
+}
+
+TEST_F(ComparisonTest, MapEntryMissingEmptyFieldIsOkTest) {
+  TextFormat::Parser parser;
+  protobuf_unittest::TestMap msg1;
+  protobuf_unittest::TestMap msg2;
+
+  ASSERT_TRUE(parser.ParseFromString(
+      "map_string_foreign_message { key: 'key1' value {}}", &msg1));
+  ASSERT_TRUE(parser.ParseFromString(
+      "map_string_foreign_message { key: 'key1' }", &msg2));
+
+  util::MessageDifferencer differencer;
+  differencer.set_scope(util::MessageDifferencer::PARTIAL);
+
+  ASSERT_TRUE(differencer.Compare(msg1, msg2));
 }
 
 // Considers strings keys as equal if they have equal lengths.
@@ -2961,7 +3190,7 @@ class LengthMapKeyComparator
 };
 
 TEST_F(ComparisonTest, MapEntryCustomMapKeyComparator) {
-  google::protobuf::TextFormat::Parser parser;
+  TextFormat::Parser parser;
   protobuf_unittest::TestMap msg1;
   protobuf_unittest::TestMap msg2;
 
@@ -2974,7 +3203,7 @@ TEST_F(ComparisonTest, MapEntryCustomMapKeyComparator) {
   LengthMapKeyComparator key_comparator;
   differencer.TreatAsMapUsingKeyComparator(
       GetFieldDescriptor(msg1, "map_string_foreign_message"), &key_comparator);
-  string output;
+  std::string output;
   differencer.ReportDifferencesToString(&output);
   // Though the above two messages have different keys for their map entries,
   // they are considered the same by key_comparator because their lengths are
@@ -3001,10 +3230,10 @@ class MatchingTest : public testing::Test {
   ~MatchingTest() {
   }
 
-  string RunWithResult(MessageDifferencer* differencer,
-                              const Message& msg1, const Message& msg2,
-                              bool result) {
-    string output;
+  std::string RunWithResult(MessageDifferencer* differencer,
+                            const Message& msg1, const Message& msg2,
+                            bool result) {
+    std::string output;
     {
       // Before we return the "output" string, we must make sure the
       // StreamReporter is destructored because its destructor will
@@ -3035,7 +3264,7 @@ TEST_F(MatchingTest, StreamReporterMatching) {
   msg2.add_rc(13);
   msg1.add_rc(17);
   msg2.add_rc(17);
-  string output;
+  std::string output;
   MessageDifferencer differencer;
   differencer.set_report_matches(true);
   differencer.ReportDifferencesToString(&output);
@@ -3055,7 +3284,7 @@ TEST_F(MatchingTest, DontReportMatchedWhenIgnoring) {
   msg2.add_rc(13);
   msg1.add_rc(17);
   msg2.add_rc(17);
-  string output;
+  std::string output;
   MessageDifferencer differencer;
   differencer.set_report_matches(true);
   differencer.ReportDifferencesToString(&output);
@@ -3310,7 +3539,7 @@ TEST(AnyTest, Simple) {
   m1.mutable_any_value()->PackFrom(value1);
   m2.mutable_any_value()->PackFrom(value2);
   util::MessageDifferencer message_differencer;
-  string difference_string;
+  std::string difference_string;
   message_differencer.ReportDifferencesToString(&difference_string);
   EXPECT_FALSE(message_differencer.Compare(m1, m2));
   EXPECT_EQ("modified: any_value.a: 20 -> 21\n", difference_string);

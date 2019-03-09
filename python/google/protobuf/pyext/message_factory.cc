@@ -28,6 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <unordered_map>
+
 #include <Python.h>
 
 #include <google/protobuf/dynamic_message.h>
@@ -41,9 +43,11 @@
     #error "Python 3.0 - 3.2 are not supported."
   #endif
   #define PyString_AsStringAndSize(ob, charpp, sizep) \
-    (PyUnicode_Check(ob)? \
-       ((*(charpp) = PyUnicode_AsUTF8AndSize(ob, (sizep))) == NULL? -1: 0): \
-       PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
+    (PyUnicode_Check(ob) ? ((*(charpp) = const_cast<char*>(                   \
+                               PyUnicode_AsUTF8AndSize(ob, (sizep)))) == NULL \
+                              ? -1                                            \
+                              : 0)                                            \
+                        : PyBytes_AsStringAndSize(ob, (charpp), (sizep)))
 #endif
 
 namespace google {
@@ -137,7 +141,7 @@ CMessageClass* GetOrCreateMessageClass(PyMessageFactory* self,
   // This is the same implementation as MessageFactory.GetPrototype().
 
   // Do not create a MessageClass that already exists.
-  hash_map<const Descriptor*, CMessageClass*>::iterator it =
+  std::unordered_map<const Descriptor*, CMessageClass*>::iterator it =
       self->classes_by_descriptor->find(descriptor);
   if (it != self->classes_by_descriptor->end()) {
     Py_INCREF(it->second);
@@ -158,7 +162,7 @@ CMessageClass* GetOrCreateMessageClass(PyMessageFactory* self,
     return NULL;
   }
   ScopedPyObjectPtr message_class(PyObject_CallObject(
-      reinterpret_cast<PyObject*>(&CMessageClass_Type), args.get()));
+      reinterpret_cast<PyObject*>(CMessageClass_Type), args.get()));
   if (message_class == NULL) {
     return NULL;
   }

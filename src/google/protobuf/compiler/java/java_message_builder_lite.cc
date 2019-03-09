@@ -35,7 +35,6 @@
 #include <google/protobuf/compiler/java/java_message_builder_lite.h>
 
 #include <algorithm>
-#include <google/protobuf/stubs/hash.h>
 #include <map>
 #include <memory>
 #include <vector>
@@ -51,20 +50,14 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/printer.h>
 #include <google/protobuf/wire_format.h>
-#include <google/protobuf/stubs/substitute.h>
 #include <google/protobuf/stubs/strutil.h>
+#include <google/protobuf/stubs/substitute.h>
+
 
 namespace google {
 namespace protobuf {
 namespace compiler {
 namespace java {
-
-namespace {
-bool GenerateHasBits(const Descriptor* descriptor) {
-  return SupportFieldPresence(descriptor->file()) ||
-      HasRepeatedFields(descriptor);
-}
-}  // namespace
 
 MessageBuilderLiteGenerator::MessageBuilderLiteGenerator(
     const Descriptor* descriptor, Context* context)
@@ -96,13 +89,13 @@ Generate(io::Printer* printer) {
   GenerateCommonBuilderMethods(printer);
 
   // oneof
-  std::map<string, string> vars;
+  std::map<std::string, std::string> vars;
   for (int i = 0; i < descriptor_->oneof_decl_count(); i++) {
     vars["oneof_name"] = context_->GetOneofGeneratorInfo(
         descriptor_->oneof_decl(i))->name;
     vars["oneof_capitalized_name"] = context_->GetOneofGeneratorInfo(
         descriptor_->oneof_decl(i))->capitalized_name;
-    vars["oneof_index"] = SimpleItoa(descriptor_->oneof_decl(i)->index());
+    vars["oneof_index"] = StrCat(descriptor_->oneof_decl(i)->index());
 
     // oneofCase() and clearOneof()
     printer->Print(vars,
@@ -118,20 +111,6 @@ Generate(io::Printer* printer) {
       "  return this;\n"
       "}\n"
       "\n");
-  }
-
-  if (GenerateHasBits(descriptor_)) {
-    // Integers for bit fields.
-    int totalBits = 0;
-    for (int i = 0; i < descriptor_->field_count(); i++) {
-      totalBits += field_generators_.get(descriptor_->field(i))
-          .GetNumBitsForBuilder();
-    }
-    int totalInts = (totalBits + 31) / 32;
-    for (int i = 0; i < totalInts; i++) {
-      printer->Print("private int $bit_field_name$;\n",
-        "bit_field_name", GetBitFieldName(i));
-    }
   }
 
   for (int i = 0; i < descriptor_->field_count(); i++) {

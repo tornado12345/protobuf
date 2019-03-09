@@ -35,9 +35,11 @@
 // Recursive descent FTW.
 
 #include <float.h>
-#include <google/protobuf/stubs/hash.h>
 #include <limits>
+#include <unordered_map>
 
+
+#include <google/protobuf/stubs/hash.h>
 
 #include <google/protobuf/stubs/casts.h>
 #include <google/protobuf/stubs/logging.h>
@@ -58,7 +60,7 @@ using internal::WireFormat;
 
 namespace {
 
-typedef hash_map<string, FieldDescriptorProto::Type> TypeNameMap;
+typedef std::unordered_map<std::string, FieldDescriptorProto::Type> TypeNameMap;
 
 TypeNameMap MakeTypeNameTable() {
   TypeNameMap result;
@@ -88,8 +90,8 @@ const TypeNameMap kTypeNames = MakeTypeNameTable();
 
 // Camel-case the field name and append "Entry" for generated map entry name.
 // e.g. map<KeyType, ValueType> foo_map => FooMapEntry
-string MapEntryName(const string& field_name) {
-  string result;
+std::string MapEntryName(const std::string& field_name) {
+  std::string result;
   static const char kSuffix[] = "Entry";
   result.reserve(field_name.size() + sizeof(kSuffix));
   bool cap_next = true;
@@ -174,7 +176,7 @@ bool Parser::Consume(const char* text) {
   }
 }
 
-bool Parser::ConsumeIdentifier(string* output, const char* error) {
+bool Parser::ConsumeIdentifier(std::string* output, const char* error) {
   if (LookingAtType(io::Tokenizer::TYPE_IDENTIFIER)) {
     *output = input_->current().text;
     input_->Next();
@@ -263,7 +265,7 @@ bool Parser::ConsumeNumber(double* output, const char* error) {
   }
 }
 
-bool Parser::ConsumeString(string* output, const char* error) {
+bool Parser::ConsumeString(std::string* output, const char* error) {
   if (LookingAtType(io::Tokenizer::TYPE_STRING)) {
     io::Tokenizer::ParseString(input_->current().text, output);
     input_->Next();
@@ -282,8 +284,8 @@ bool Parser::ConsumeString(string* output, const char* error) {
 bool Parser::TryConsumeEndOfDeclaration(
     const char* text, const LocationRecorder* location) {
   if (LookingAt(text)) {
-    string leading, trailing;
-    std::vector<string> detached;
+    std::string leading, trailing;
+    std::vector<std::string> detached;
     input_->NextWithComments(&trailing, &detached, &leading);
 
     // Save the leading comments for next time, and recall the leading comments
@@ -322,23 +324,23 @@ bool Parser::ConsumeEndOfDeclaration(
 
 // -------------------------------------------------------------------
 
-void Parser::AddError(int line, int column, const string& error) {
+void Parser::AddError(int line, int column, const std::string& error) {
   if (error_collector_ != NULL) {
     error_collector_->AddError(line, column, error);
   }
   had_errors_ = true;
 }
 
-void Parser::AddError(const string& error) {
+void Parser::AddError(const std::string& error) {
   AddError(input_->current().line, input_->current().column, error);
 }
 
 // -------------------------------------------------------------------
 
 Parser::LocationRecorder::LocationRecorder(Parser* parser)
-  : parser_(parser),
-    source_code_info_(parser->source_code_info_),
-    location_(parser_->source_code_info_->add_location()) {
+    : parser_(parser),
+      source_code_info_(parser->source_code_info_),
+      location_(parser_->source_code_info_->add_location()) {
   location_->add_span(parser_->input_->current().line);
   location_->add_span(parser_->input_->current().column);
 }
@@ -419,8 +421,8 @@ int Parser::LocationRecorder::CurrentPathSize() const {
 }
 
 void Parser::LocationRecorder::AttachComments(
-    string* leading, string* trailing,
-    std::vector<string>* detached_comments) const {
+    std::string* leading, std::string* trailing,
+    std::vector<std::string>* detached_comments) const {
   GOOGLE_CHECK(!location_->has_leading_comments());
   GOOGLE_CHECK(!location_->has_trailing_comments());
 
@@ -494,7 +496,7 @@ bool Parser::ValidateEnum(const EnumDescriptorProto* proto) {
   }
 
   if (has_allow_alias && !allow_alias) {
-    string error =
+    std::string error =
         "\"" + proto->name() +
         "\" declares 'option allow_alias = false;' which has no effect. "
         "Please remove the declaration.";
@@ -515,7 +517,7 @@ bool Parser::ValidateEnum(const EnumDescriptorProto* proto) {
     }
   }
   if (allow_alias && !has_duplicates) {
-    string error =
+    std::string error =
         "\"" + proto->name() +
         "\" declares support for enum aliases but no enum values share field "
         "numbers. Please remove the unnecessary 'option allow_alias = true;' "
@@ -599,7 +601,7 @@ bool Parser::ParseSyntaxIdentifier(const LocationRecorder& parent) {
       "File must begin with a syntax statement, e.g. 'syntax = \"proto2\";'."));
   DO(Consume("="));
   io::Tokenizer::Token syntax_token = input_->current();
-  string syntax;
+  std::string syntax;
   DO(ConsumeString(&syntax, "Expected syntax identifier."));
   DO(ConsumeEndOfDeclaration(";", &syntax_location));
 
@@ -856,7 +858,7 @@ bool Parser::ParseMessageFieldNoLabel(
 
     bool type_parsed = false;
     FieldDescriptorProto::Type type = FieldDescriptorProto::TYPE_INT32;
-    string type_name;
+    std::string type_name;
 
     // Special case map field. We only treat the field as a map field if the
     // field type name starts with the word "map" with a following "<".
@@ -1006,7 +1008,7 @@ void Parser::GenerateMapEntry(const MapField& map_field,
                               FieldDescriptorProto* field,
                               RepeatedPtrField<DescriptorProto>* messages) {
   DescriptorProto* entry = messages->Add();
-  string entry_name = MapEntryName(field->name());
+  std::string entry_name = MapEntryName(field->name());
   field->set_type_name(entry_name);
   entry->set_name(entry_name);
   entry->mutable_options()->set_map_entry(true);
@@ -1111,7 +1113,7 @@ bool Parser::ParseDefaultAssignment(
                             FieldDescriptorProto::kDefaultValueFieldNumber);
   location.RecordLegacyLocation(
       field, DescriptorPool::ErrorCollector::DEFAULT_VALUE);
-  string* default_value = field->mutable_default_value();
+  std::string* default_value = field->mutable_default_value();
 
   if (!field->has_type()) {
     // The field has a type name, but we don't know if it is a message or an
@@ -1153,7 +1155,7 @@ bool Parser::ParseDefaultAssignment(
       DO(ConsumeInteger64(max_value, &value,
                           "Expected integer for field default value."));
       // And stringify it again.
-      default_value->append(SimpleItoa(value));
+      default_value->append(StrCat(value));
       break;
     }
 
@@ -1176,7 +1178,7 @@ bool Parser::ParseDefaultAssignment(
       DO(ConsumeInteger64(max_value, &value,
                           "Expected integer for field default value."));
       // And stringify it again.
-      default_value->append(SimpleItoa(value));
+      default_value->append(StrCat(value));
       break;
     }
 
@@ -1258,7 +1260,7 @@ bool Parser::ParseOptionNamePart(UninterpretedOption* uninterpreted_option,
                                  const LocationRecorder& part_location,
                                  const FileDescriptorProto* containing_file) {
   UninterpretedOption::NamePart* name = uninterpreted_option->add_name();
-  string identifier;  // We parse identifiers into this string.
+  std::string identifier;  // We parse identifiers into this string.
   if (LookingAt("(")) {  // This is an extension.
     DO(Consume("("));
 
@@ -1291,7 +1293,7 @@ bool Parser::ParseOptionNamePart(UninterpretedOption* uninterpreted_option,
   return true;
 }
 
-bool Parser::ParseUninterpretedBlock(string* value) {
+bool Parser::ParseUninterpretedBlock(std::string* value) {
   // Note that enclosing braces are not added to *value.
   // We do NOT use ConsumeEndOfStatement for this brace because it's delimiting
   // an expression, not a block of statements.
@@ -1392,7 +1394,7 @@ bool Parser::ParseOption(Message* options,
           AddError("Invalid '-' symbol before identifier.");
           return false;
         }
-        string value;
+        std::string value;
         DO(ConsumeIdentifier(&value, "Expected identifier."));
         uninterpreted_option->set_identifier_value(value);
         break;
@@ -1430,7 +1432,7 @@ bool Parser::ParseOption(Message* options,
           AddError("Invalid '-' symbol before string.");
           return false;
         }
-        string value;
+        std::string value;
         DO(ConsumeString(&value, "Expected string."));
         uninterpreted_option->set_string_value(value);
         break;
@@ -1511,7 +1513,6 @@ bool Parser::ParseExtensions(DescriptorProto* message,
     range->set_end(end);
   } while (TryConsume(","));
 
-
   if (LookingAt("[")) {
     int range_number_index = extensions_location.CurrentPathSize();
     SourceCodeInfo info;
@@ -1525,8 +1526,7 @@ bool Parser::ParseExtensions(DescriptorProto* message,
           extensions_location, 0 /* we fill this in w/ actual index below */,
           &info);
       LocationRecorder location(
-          index_location,
-          DescriptorProto::ExtensionRange::kOptionsFieldNumber);
+          index_location, DescriptorProto::ExtensionRange::kOptionsFieldNumber);
       DO(Consume("["));
 
       do {
@@ -1546,12 +1546,12 @@ bool Parser::ParseExtensions(DescriptorProto* message,
     for (int i = old_range_size; i < message->extension_range_size(); i++) {
       for (int j = 0; j < info.location_size(); j++) {
         if (info.location(j).path_size() == range_number_index + 1) {
-          // this location's path is up to the extension range index, but doesn't
-          // include options; so it's redundant with location above
+          // this location's path is up to the extension range index, but
+          // doesn't include options; so it's redundant with location above
           continue;
         }
         SourceCodeInfo_Location* dest = source_code_info_->add_location();
-        dest->CopyFrom(info.location(j));
+        *dest = info.location(j);
         dest->set_path(range_number_index, i);
       }
     }
@@ -1565,15 +1565,18 @@ bool Parser::ParseExtensions(DescriptorProto* message,
 // name literals.
 bool Parser::ParseReserved(DescriptorProto* message,
                            const LocationRecorder& message_location) {
+  io::Tokenizer::Token start_token = input_->current();
   // Parse the declaration.
   DO(Consume("reserved"));
   if (LookingAtType(io::Tokenizer::TYPE_STRING)) {
     LocationRecorder location(message_location,
                               DescriptorProto::kReservedNameFieldNumber);
+    location.StartAt(start_token);
     return ParseReservedNames(message, location);
   } else {
     LocationRecorder location(message_location,
                               DescriptorProto::kReservedRangeFieldNumber);
+    location.StartAt(start_token);
     return ParseReservedNumbers(message, location);
   }
 }
@@ -1639,16 +1642,19 @@ bool Parser::ParseReservedNumbers(DescriptorProto* message,
 }
 
 bool Parser::ParseReserved(EnumDescriptorProto* message,
-                          const LocationRecorder& message_location) {
+                           const LocationRecorder& message_location) {
+  io::Tokenizer::Token start_token = input_->current();
   // Parse the declaration.
   DO(Consume("reserved"));
   if (LookingAtType(io::Tokenizer::TYPE_STRING)) {
     LocationRecorder location(message_location,
                               DescriptorProto::kReservedNameFieldNumber);
+    location.StartAt(start_token);
     return ParseReservedNames(message, location);
   } else {
     LocationRecorder location(message_location,
                               DescriptorProto::kReservedRangeFieldNumber);
+    location.StartAt(start_token);
     return ParseReservedNumbers(message, location);
   }
 }
@@ -1719,7 +1725,7 @@ bool Parser::ParseExtend(RepeatedPtrField<FieldDescriptorProto>* extensions,
 
   // Parse the extendee type.
   io::Tokenizer::Token extendee_start = input_->current();
-  string extendee;
+  std::string extendee;
   DO(ParseUserDefinedType(&extendee));
   io::Tokenizer::Token extendee_end = input_->previous();
 
@@ -2127,7 +2133,7 @@ bool Parser::ParseLabel(FieldDescriptorProto::Label* label,
 }
 
 bool Parser::ParseType(FieldDescriptorProto::Type* type,
-                       string* type_name) {
+                       std::string* type_name) {
   TypeNameMap::const_iterator iter = kTypeNames.find(input_->current().text);
   if (iter != kTypeNames.end()) {
     *type = iter->second;
@@ -2138,7 +2144,7 @@ bool Parser::ParseType(FieldDescriptorProto::Type* type,
   return true;
 }
 
-bool Parser::ParseUserDefinedType(string* type_name) {
+bool Parser::ParseUserDefinedType(std::string* type_name) {
   type_name->clear();
 
   TypeNameMap::const_iterator iter = kTypeNames.find(input_->current().text);
@@ -2159,7 +2165,7 @@ bool Parser::ParseUserDefinedType(string* type_name) {
   if (TryConsume(".")) type_name->append(".");
 
   // Consume the first part of the name.
-  string identifier;
+  std::string identifier;
   DO(ConsumeIdentifier(&identifier, "Expected type name."));
   type_name->append(identifier);
 
@@ -2185,59 +2191,54 @@ bool Parser::ParsePackage(FileDescriptorProto* file,
     file->clear_package();
   }
 
+  LocationRecorder location(root_location,
+                            FileDescriptorProto::kPackageFieldNumber);
+  location.RecordLegacyLocation(file, DescriptorPool::ErrorCollector::NAME);
+
   DO(Consume("package"));
 
-  {
-    LocationRecorder location(root_location,
-                              FileDescriptorProto::kPackageFieldNumber);
-    location.RecordLegacyLocation(file, DescriptorPool::ErrorCollector::NAME);
-
-    while (true) {
-      string identifier;
-      DO(ConsumeIdentifier(&identifier, "Expected identifier."));
-      file->mutable_package()->append(identifier);
-      if (!TryConsume(".")) break;
-      file->mutable_package()->append(".");
-    }
-
-    location.EndAt(input_->previous());
-
-    DO(ConsumeEndOfDeclaration(";", &location));
+  while (true) {
+    std::string identifier;
+    DO(ConsumeIdentifier(&identifier, "Expected identifier."));
+    file->mutable_package()->append(identifier);
+    if (!TryConsume(".")) break;
+    file->mutable_package()->append(".");
   }
+
+  DO(ConsumeEndOfDeclaration(";", &location));
 
   return true;
 }
 
-bool Parser::ParseImport(RepeatedPtrField<string>* dependency,
+bool Parser::ParseImport(RepeatedPtrField<std::string>* dependency,
                          RepeatedField<int32>* public_dependency,
                          RepeatedField<int32>* weak_dependency,
                          const LocationRecorder& root_location,
                          const FileDescriptorProto* containing_file) {
+  LocationRecorder location(root_location,
+                            FileDescriptorProto::kDependencyFieldNumber,
+                            dependency->size());
+
   DO(Consume("import"));
+
   if (LookingAt("public")) {
-    LocationRecorder location(
+    LocationRecorder public_location(
         root_location, FileDescriptorProto::kPublicDependencyFieldNumber,
         public_dependency->size());
     DO(Consume("public"));
     *public_dependency->Add() = dependency->size();
   } else if (LookingAt("weak")) {
-    LocationRecorder location(
+    LocationRecorder weak_location(
         root_location, FileDescriptorProto::kWeakDependencyFieldNumber,
         weak_dependency->size());
     DO(Consume("weak"));
     *weak_dependency->Add() = dependency->size();
   }
-  {
-    LocationRecorder location(root_location,
-                              FileDescriptorProto::kDependencyFieldNumber,
-                              dependency->size());
-    DO(ConsumeString(dependency->Add(),
-      "Expected a string naming the file to import."));
 
-    location.EndAt(input_->previous());
+  DO(ConsumeString(dependency->Add(),
+                   "Expected a string naming the file to import."));
+  DO(ConsumeEndOfDeclaration(";", &location));
 
-    DO(ConsumeEndOfDeclaration(";", &location));
-  }
   return true;
 }
 
@@ -2277,5 +2278,4 @@ void SourceLocationTable::Clear() {
 
 }  // namespace compiler
 }  // namespace protobuf
-
 }  // namespace google

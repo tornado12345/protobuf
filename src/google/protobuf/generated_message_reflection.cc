@@ -44,6 +44,8 @@
 #include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/inlined_string_field.h>
 #include <google/protobuf/map_field.h>
+#include <google/protobuf/map_field_inl.h>
+#include <google/protobuf/stubs/mutex.h>
 #include <google/protobuf/repeated_field.h>
 #include <google/protobuf/wire_format.h>
 
@@ -60,8 +62,7 @@ bool IsMapFieldInApi(const FieldDescriptor* field) {
 }
 }  // anonymous namespace
 
-bool ParseNamedEnum(const EnumDescriptor* descriptor,
-                    const string& name,
+bool ParseNamedEnum(const EnumDescriptor* descriptor, const std::string& name,
                     int* value) {
   const EnumValueDescriptor* d = descriptor->FindValueByName(name);
   if (d == NULL) return false;
@@ -69,7 +70,7 @@ bool ParseNamedEnum(const EnumDescriptor* descriptor,
   return true;
 }
 
-const string& NameOfEnum(const EnumDescriptor* descriptor, int value) {
+const std::string& NameOfEnum(const EnumDescriptor* descriptor, int value) {
   const EnumValueDescriptor* d = descriptor->FindValueByNumber(value);
   return (d == NULL ? GetEmptyString() : d->name());
 }
@@ -200,15 +201,7 @@ GeneratedMessageReflection::~GeneratedMessageReflection() {}
 
 const UnknownFieldSet& GeneratedMessageReflection::GetUnknownFields(
     const Message& message) const {
-  if (descriptor_->file()->syntax() == FileDescriptor::SYNTAX_PROTO3 &&
-      !GetProto3PreserveUnknownsDefault()) {
-    // We have to ensure that any mutations made to the return value of
-    // MutableUnknownFields() are not reflected here when Proto3 defaults to
-    // discard unknowns.
-    return *UnknownFieldSet::default_instance();
-  } else {
-    return GetInternalMetadataWithArena(message).unknown_fields();
-  }
+  return GetInternalMetadataWithArena(message).unknown_fields();
 }
 
 UnknownFieldSet* GeneratedMessageReflection::MutableUnknownFields(
@@ -251,8 +244,9 @@ size_t GeneratedMessageReflection::SpaceUsedLong(const Message& message) const {
           switch (field->options().ctype()) {
             default:  // TODO(kenton):  Support other string reps.
             case FieldOptions::STRING:
-              total_size += GetRaw<RepeatedPtrField<string> >(message, field)
-                                .SpaceUsedExcludingSelfLong();
+              total_size +=
+                  GetRaw<RepeatedPtrField<std::string> >(message, field)
+                      .SpaceUsedExcludingSelfLong();
               break;
           }
           break;
@@ -292,18 +286,18 @@ size_t GeneratedMessageReflection::SpaceUsedLong(const Message& message) const {
             default:  // TODO(kenton):  Support other string reps.
             case FieldOptions::STRING: {
               if (IsInlined(field)) {
-                const string* ptr =
+                const std::string* ptr =
                     &GetField<InlinedStringField>(message, field).GetNoArena();
                 total_size += StringSpaceUsedExcludingSelfLong(*ptr);
                 break;
               }
 
-              // Initially, the string points to the default value stored in
-              // the prototype. Only count the string if it has been changed
-              // from the default value.
-              const string* default_ptr =
+              // Initially, the string points to the default value stored
+              // in the prototype. Only count the string if it has been
+              // changed from the default value.
+              const std::string* default_ptr =
                   &DefaultRaw<ArenaStringPtr>(field).Get();
-              const string* ptr =
+              const std::string* ptr =
                   &GetField<ArenaStringPtr>(message, field).Get();
 
               if (ptr != default_ptr) {
@@ -361,23 +355,20 @@ void GeneratedMessageReflection::SwapField(
         switch (field->options().ctype()) {
           default:  // TODO(kenton):  Support other string reps.
           case FieldOptions::STRING:
-            MutableRaw<RepeatedPtrFieldBase>(message1, field)->
-                Swap<GenericTypeHandler<string> >(
+            MutableRaw<RepeatedPtrFieldBase>(message1, field)
+                ->Swap<GenericTypeHandler<std::string> >(
                     MutableRaw<RepeatedPtrFieldBase>(message2, field));
             break;
         }
         break;
       case FieldDescriptor::CPPTYPE_MESSAGE:
         if (IsMapFieldInApi(field)) {
-          MutableRaw<MapFieldBase>(message1, field)->
-            MutableRepeatedField()->
-              Swap<GenericTypeHandler<google::protobuf::Message> >(
-                MutableRaw<MapFieldBase>(message2, field)->
-                  MutableRepeatedField());
+          MutableRaw<MapFieldBase>(message1, field)->Swap(
+              MutableRaw<MapFieldBase>(message2, field));
         } else {
-          MutableRaw<RepeatedPtrFieldBase>(message1, field)->
-            Swap<GenericTypeHandler<google::protobuf::Message> >(
-              MutableRaw<RepeatedPtrFieldBase>(message2, field));
+          MutableRaw<RepeatedPtrFieldBase>(message1, field)
+              ->Swap<GenericTypeHandler<Message> >(
+                  MutableRaw<RepeatedPtrFieldBase>(message2, field));
         }
         break;
 
@@ -446,12 +437,12 @@ void GeneratedMessageReflection::SwapField(
                   MutableRaw<ArenaStringPtr>(message1, field);
               ArenaStringPtr* string2 =
                   MutableRaw<ArenaStringPtr>(message2, field);
-              const string* default_ptr =
+              const std::string* default_ptr =
                   &DefaultRaw<ArenaStringPtr>(field).Get();
               if (arena1 == arena2) {
                 string1->Swap(string2, default_ptr, arena1);
               } else {
-                const string temp = string1->Get();
+                const std::string temp = string1->Get();
                 string1->Set(default_ptr, string2->Get(), arena1);
                 string2->Set(default_ptr, temp, arena2);
               }
@@ -482,7 +473,7 @@ void GeneratedMessageReflection::SwapOneofField(
   bool temp_bool;
   int temp_int;
   Message* temp_message = NULL;
-  string temp_string;
+  std::string temp_string;
 
   // Stores message1's oneof field to a temp variable.
   const FieldDescriptor* field1 = NULL;
@@ -816,14 +807,14 @@ void GeneratedMessageReflection::ClearField(
             default:  // TODO(kenton):  Support other string reps.
             case FieldOptions::STRING: {
               if (IsInlined(field)) {
-                const string* default_ptr =
+                const std::string* default_ptr =
                     &DefaultRaw<InlinedStringField>(field).GetNoArena();
                 MutableRaw<InlinedStringField>(message, field)->SetNoArena(
                     default_ptr, *default_ptr);
                 break;
               }
 
-              const string* default_ptr =
+              const std::string* default_ptr =
                   &DefaultRaw<ArenaStringPtr>(field).Get();
               MutableRaw<ArenaStringPtr>(message, field)->SetAllocated(
                   default_ptr, NULL, GetArena(message));
@@ -868,7 +859,7 @@ void GeneratedMessageReflection::ClearField(
         switch (field->options().ctype()) {
           default:  // TODO(kenton):  Support other string reps.
           case FieldOptions::STRING:
-            MutableRaw<RepeatedPtrField<string> >(message, field)->Clear();
+            MutableRaw<RepeatedPtrField<std::string> >(message, field)->Clear();
             break;
         }
         break;
@@ -876,9 +867,7 @@ void GeneratedMessageReflection::ClearField(
 
       case FieldDescriptor::CPPTYPE_MESSAGE: {
         if (IsMapFieldInApi(field)) {
-          MutableRaw<MapFieldBase>(message, field)
-              ->MutableRepeatedField()
-              ->Clear<GenericTypeHandler<Message> >();
+          MutableRaw<MapFieldBase>(message, field)->Clear();
         } else {
           // We don't know which subclass of RepeatedPtrFieldBase the type is,
           // so we use RepeatedPtrFieldBase directly.
@@ -920,7 +909,8 @@ void GeneratedMessageReflection::RemoveLast(
         switch (field->options().ctype()) {
           default:  // TODO(kenton):  Support other string reps.
           case FieldOptions::STRING:
-            MutableRaw<RepeatedPtrField<string> >(message, field)->RemoveLast();
+            MutableRaw<RepeatedPtrField<std::string> >(message, field)
+                ->RemoveLast();
             break;
         }
         break;
@@ -1035,8 +1025,6 @@ void GeneratedMessageReflection::ListFields(
   const uint32* const has_bits =
       schema_.HasHasbits() ? GetHasBits(message) : NULL;
   const uint32* const has_bits_indices = schema_.has_bit_indices_;
-  const uint32* const oneof_case_array =
-      GetConstPointerAtOffset<uint32>(&message, schema_.oneof_case_offset_);
   output->reserve(descriptor_->field_count());
   for (int i = 0; i <= last_non_weak_field_index_; i++) {
     const FieldDescriptor* field = descriptor_->field(i);
@@ -1047,6 +1035,8 @@ void GeneratedMessageReflection::ListFields(
     } else {
       const OneofDescriptor* containing_oneof = field->containing_oneof();
       if (containing_oneof) {
+        const uint32* const oneof_case_array = GetConstPointerAtOffset<uint32>(
+            &message, schema_.oneof_case_offset_);
         // Equivalent to: HasOneofField(message, field)
         if (oneof_case_array[containing_oneof->index()] == field->number()) {
           output->push_back(field);
@@ -1145,7 +1135,7 @@ DEFINE_PRIMITIVE_ACCESSORS(Bool  , bool  , bool  , BOOL  )
 
 // -------------------------------------------------------------------
 
-string GeneratedMessageReflection::GetString(
+std::string GeneratedMessageReflection::GetString(
     const Message& message, const FieldDescriptor* field) const {
   USAGE_CHECK_ALL(GetString, SINGULAR, STRING);
   if (field->is_extension()) {
@@ -1165,9 +1155,9 @@ string GeneratedMessageReflection::GetString(
   }
 }
 
-const string& GeneratedMessageReflection::GetStringReference(
-    const Message& message,
-    const FieldDescriptor* field, string* scratch) const {
+const std::string& GeneratedMessageReflection::GetStringReference(
+    const Message& message, const FieldDescriptor* field,
+    std::string* scratch) const {
   USAGE_CHECK_ALL(GetStringReference, SINGULAR, STRING);
   if (field->is_extension()) {
     return GetExtensionSet(message).GetString(field->number(),
@@ -1187,9 +1177,9 @@ const string& GeneratedMessageReflection::GetStringReference(
 }
 
 
-void GeneratedMessageReflection::SetString(
-    Message* message, const FieldDescriptor* field,
-    const string& value) const {
+void GeneratedMessageReflection::SetString(Message* message,
+                                           const FieldDescriptor* field,
+                                           const std::string& value) const {
   USAGE_CHECK_ALL(SetString, SINGULAR, STRING);
   if (field->is_extension()) {
     return MutableExtensionSet(message)->SetString(field->number(),
@@ -1204,14 +1194,16 @@ void GeneratedMessageReflection::SetString(
           break;
         }
 
-        const string* default_ptr = &DefaultRaw<ArenaStringPtr>(field).Get();
+        const std::string* default_ptr =
+            &DefaultRaw<ArenaStringPtr>(field).Get();
         if (field->containing_oneof() && !HasOneofField(*message, field)) {
           ClearOneof(message, field->containing_oneof());
           MutableField<ArenaStringPtr>(message, field)->UnsafeSetDefault(
               default_ptr);
         }
-        MutableField<ArenaStringPtr>(message, field)->Set(default_ptr,
-            value, GetArena(message));
+        MutableField<ArenaStringPtr>(message, field)
+            ->Mutable(default_ptr, GetArena(message))
+            ->assign(value);
         break;
       }
     }
@@ -1219,7 +1211,7 @@ void GeneratedMessageReflection::SetString(
 }
 
 
-string GeneratedMessageReflection::GetRepeatedString(
+std::string GeneratedMessageReflection::GetRepeatedString(
     const Message& message, const FieldDescriptor* field, int index) const {
   USAGE_CHECK_ALL(GetRepeatedString, REPEATED, STRING);
   if (field->is_extension()) {
@@ -1228,14 +1220,14 @@ string GeneratedMessageReflection::GetRepeatedString(
     switch (field->options().ctype()) {
       default:  // TODO(kenton):  Support other string reps.
       case FieldOptions::STRING:
-        return GetRepeatedPtrField<string>(message, field, index);
+        return GetRepeatedPtrField<std::string>(message, field, index);
     }
   }
 }
 
-const string& GeneratedMessageReflection::GetRepeatedStringReference(
-    const Message& message, const FieldDescriptor* field,
-    int index, string* scratch) const {
+const std::string& GeneratedMessageReflection::GetRepeatedStringReference(
+    const Message& message, const FieldDescriptor* field, int index,
+    std::string* scratch) const {
   USAGE_CHECK_ALL(GetRepeatedStringReference, REPEATED, STRING);
   if (field->is_extension()) {
     return GetExtensionSet(message).GetRepeatedString(field->number(), index);
@@ -1243,15 +1235,15 @@ const string& GeneratedMessageReflection::GetRepeatedStringReference(
     switch (field->options().ctype()) {
       default:  // TODO(kenton):  Support other string reps.
       case FieldOptions::STRING:
-        return GetRepeatedPtrField<string>(message, field, index);
+        return GetRepeatedPtrField<std::string>(message, field, index);
     }
   }
 }
 
 
 void GeneratedMessageReflection::SetRepeatedString(
-    Message* message, const FieldDescriptor* field,
-    int index, const string& value) const {
+    Message* message, const FieldDescriptor* field, int index,
+    const std::string& value) const {
   USAGE_CHECK_ALL(SetRepeatedString, REPEATED, STRING);
   if (field->is_extension()) {
     MutableExtensionSet(message)->SetRepeatedString(
@@ -1260,16 +1252,16 @@ void GeneratedMessageReflection::SetRepeatedString(
     switch (field->options().ctype()) {
       default:  // TODO(kenton):  Support other string reps.
       case FieldOptions::STRING:
-        *MutableRepeatedField<string>(message, field, index) = value;
+        *MutableRepeatedField<std::string>(message, field, index) = value;
         break;
     }
   }
 }
 
 
-void GeneratedMessageReflection::AddString(
-    Message* message, const FieldDescriptor* field,
-    const string& value) const {
+void GeneratedMessageReflection::AddString(Message* message,
+                                           const FieldDescriptor* field,
+                                           const std::string& value) const {
   USAGE_CHECK_ALL(AddString, REPEATED, STRING);
   if (field->is_extension()) {
     MutableExtensionSet(message)->AddString(field->number(),
@@ -1278,7 +1270,7 @@ void GeneratedMessageReflection::AddString(
     switch (field->options().ctype()) {
       default:  // TODO(kenton):  Support other string reps.
       case FieldOptions::STRING:
-        *AddField<string>(message, field) = value;
+        *AddField<std::string>(message, field) = value;
         break;
     }
   }
@@ -1330,11 +1322,8 @@ void GeneratedMessageReflection::SetEnumValue(
     const EnumValueDescriptor* value_desc =
         field->enum_type()->FindValueByNumber(value);
     if (value_desc == NULL) {
-      GOOGLE_LOG(DFATAL) << "SetEnumValue accepts only valid integer values: value "
-                  << value << " unexpected for field " << field->full_name();
-      // In production builds, DFATAL will not terminate the program, so we have
-      // to do something reasonable: just set the default value.
-      value = field->default_value_enum()->number();
+      MutableUnknownFields(message)->AddVarint(field->number(), value);
+      return;
     }
   }
   SetEnumValueInternal(message, field, value);
@@ -1391,12 +1380,8 @@ void GeneratedMessageReflection::SetRepeatedEnumValue(
     const EnumValueDescriptor* value_desc =
         field->enum_type()->FindValueByNumber(value);
     if (value_desc == NULL) {
-      GOOGLE_LOG(DFATAL) << "SetRepeatedEnumValue accepts only valid integer values: "
-                  << "value " << value << " unexpected for field "
-                  << field->full_name();
-      // In production builds, DFATAL will not terminate the program, so we have
-      // to do something reasonable: just set the default value.
-      value = field->default_value_enum()->number();
+      MutableUnknownFields(message)->AddVarint(field->number(), value);
+      return;
     }
   }
   SetRepeatedEnumValueInternal(message, field, index, value);
@@ -1432,11 +1417,8 @@ void GeneratedMessageReflection::AddEnumValue(
     const EnumValueDescriptor* value_desc =
         field->enum_type()->FindValueByNumber(value);
     if (value_desc == NULL) {
-      GOOGLE_LOG(DFATAL) << "AddEnumValue accepts only valid integer values: value "
-                  << value << " unexpected for field " << field->full_name();
-      // In production builds, DFATAL will not terminate the program, so we have
-      // to do something reasonable: just set the default value.
-      value = field->default_value_enum()->number();
+      MutableUnknownFields(message)->AddVarint(field->number(), value);
+      return;
     }
   }
   AddEnumValueInternal(message, field, value);
@@ -1724,8 +1706,6 @@ void* GeneratedMessageReflection::MutableRawRepeatedField(
   if (field->cpp_type() != cpptype)
     ReportReflectionUsageTypeError(descriptor_,
         field, "MutableRawRepeatedField", cpptype);
-  if (ctype >= 0)
-    GOOGLE_CHECK_EQ(field->options().ctype(), ctype) << "subtype mismatch";
   if (desc != NULL)
     GOOGLE_CHECK_EQ(field->message_type(), desc) << "wrong submessage type";
   if (field->is_extension()) {
@@ -1847,7 +1827,7 @@ int GeneratedMessageReflection::MapSize(
 // -----------------------------------------------------------------------------
 
 const FieldDescriptor* GeneratedMessageReflection::FindKnownExtensionByName(
-    const string& name) const {
+    const std::string& name) const {
   if (!schema_.HasExtensionSet()) return NULL;
 
   const FieldDescriptor* result = descriptor_pool_->FindExtensionByName(name);
@@ -2006,7 +1986,7 @@ inline bool GeneratedMessageReflection::HasBit(
     // field must be a scalar.
 
     // Scalar primitive (numeric or string/bytes) fields are present if
-    // their value is non-zero (numeric) or non-empty (string/bytes).  N.B.:
+    // their value is non-zero (numeric) or non-empty (string/bytes). N.B.:
     // we must use this definition here, rather than the "scalar fields
     // always present" in the proto3 docs, because MergeFrom() semantics
     // require presence as "present on wire", and reflection-based merge
@@ -2125,7 +2105,7 @@ inline void GeneratedMessageReflection::ClearOneof(
           switch (field->options().ctype()) {
             default:  // TODO(kenton):  Support other string reps.
             case FieldOptions::STRING: {
-              const string* default_ptr =
+              const std::string* default_ptr =
                   &DefaultRaw<ArenaStringPtr>(field).Get();
               MutableField<ArenaStringPtr>(message, field)->
                   Destroy(default_ptr, GetArena(message));
@@ -2242,12 +2222,20 @@ void* GeneratedMessageReflection::RepeatedFieldData(
   }
 }
 
-MapFieldBase* GeneratedMessageReflection::MapData(
+MapFieldBase* GeneratedMessageReflection::MutableMapData(
     Message* message, const FieldDescriptor* field) const {
   USAGE_CHECK(IsMapFieldInApi(field),
               "GetMapData",
               "Field is not a map field.");
   return MutableRaw<MapFieldBase>(message, field);
+}
+
+const MapFieldBase* GeneratedMessageReflection::GetMapData(
+    const Message& message, const FieldDescriptor* field) const {
+  USAGE_CHECK(IsMapFieldInApi(field),
+              "GetMapData",
+              "Field is not a map field.");
+  return &(GetRaw<MapFieldBase>(message, field));
 }
 
 namespace {
@@ -2298,7 +2286,7 @@ class AssignDescriptorsHelper {
         descriptor,
         MigrationToReflectionSchema(default_instance_data_, offsets_,
                                     *schemas_),
-        ::google::protobuf::DescriptorPool::generated_pool(), factory_);
+        DescriptorPool::generated_pool(), factory_);
     for (int i = 0; i < descriptor->enum_type_count(); i++) {
       AssignEnumDescriptor(descriptor->enum_type(i));
     }
@@ -2327,55 +2315,52 @@ class AssignDescriptorsHelper {
 // automatically delete the allocated reflection. MetadataOwner owns
 // all the allocated reflection instances.
 struct MetadataOwner {
-  void AddArray(const Metadata* begin, const Metadata* end) {
-    MutexLock lock(&mu_);
-    metadata_arrays_.push_back(std::make_pair(begin, end));
-  }
-
-  static MetadataOwner* Instance() {
-    static MetadataOwner* res = new MetadataOwner;
-    return res;
-  }
-
- private:
-  // Use the constructor to register the shutdown code. Because c++ makes sure
-  // this called only once.
-  MetadataOwner() { OnShutdown(&DeleteMetadata); }
   ~MetadataOwner() {
-    for (int i = 0; i < metadata_arrays_.size(); i++) {
-      for (const Metadata* m = metadata_arrays_[i].first;
-           m < metadata_arrays_[i].second; m++) {
+    for (auto range : metadata_arrays_) {
+      for (const Metadata* m = range.first; m < range.second; m++) {
         delete m->reflection;
       }
     }
   }
 
-  static void DeleteMetadata() {
-    delete Instance();
+  void AddArray(const Metadata* begin, const Metadata* end) {
+    mu_.Lock();
+    metadata_arrays_.push_back(std::make_pair(begin, end));
+    mu_.Unlock();
   }
 
-  Mutex mu_;
+  static MetadataOwner* Instance() {
+    static MetadataOwner* res = OnShutdownDelete(new MetadataOwner);
+    return res;
+  }
+
+ private:
+  MetadataOwner() = default;  // private because singleton
+
+  WrappedMutex mu_;
   std::vector<std::pair<const Metadata*, const Metadata*> > metadata_arrays_;
 };
 
-}  // namespace
-
-void AssignDescriptors(
-    const string& filename, const MigrationSchema* schemas,
-    const Message* const* default_instances_, const uint32* offsets,
-    // update the following descriptor arrays.
-    Metadata* file_level_metadata,
-    const EnumDescriptor** file_level_enum_descriptors,
-    const ServiceDescriptor** file_level_service_descriptors) {
-  const ::google::protobuf::FileDescriptor* file =
-      ::google::protobuf::DescriptorPool::generated_pool()->FindFileByName(filename);
+void AssignDescriptorsImpl(const AssignDescriptorsTable* table) {
+  // Ensure the file descriptor is added to the pool.
+  {
+    // This only happens once per proto file. So a global mutex to serialize
+    // calls to AddDescriptors.
+    static WrappedMutex mu{GOOGLE_PROTOBUF_LINKER_INITIALIZED};
+    mu.Lock();
+    table->add_descriptors();
+    mu.Unlock();
+  }
+  // Fill the arrays with pointers to descriptors and reflection classes.
+  const FileDescriptor* file =
+      DescriptorPool::generated_pool()->FindFileByName(table->filename);
   GOOGLE_CHECK(file != NULL);
 
   MessageFactory* factory = MessageFactory::generated_factory();
 
-  AssignDescriptorsHelper<MigrationSchema> helper(factory, file_level_metadata,
-                                 file_level_enum_descriptors, schemas,
-                                 default_instances_, offsets);
+  AssignDescriptorsHelper<MigrationSchema> helper(
+      factory, table->file_level_metadata, table->file_level_enum_descriptors,
+      table->schemas, table->default_instances, table->offsets);
 
   for (int i = 0; i < file->message_type_count(); i++) {
     helper.AssignMessageDescriptor(file->message_type(i));
@@ -2386,13 +2371,48 @@ void AssignDescriptors(
   }
   if (file->options().cc_generic_services()) {
     for (int i = 0; i < file->service_count(); i++) {
-      file_level_service_descriptors[i] = file->service(i);
+      table->file_level_service_descriptors[i] = file->service(i);
     }
   }
-  MetadataOwner::Instance()->AddArray(
-      file_level_metadata, helper.GetCurrentMetadataPtr());
+  MetadataOwner::Instance()->AddArray(table->file_level_metadata,
+                                      helper.GetCurrentMetadataPtr());
 }
 
+void AddDescriptorsImpl(const DescriptorTable* table, const InitFunc* deps,
+                        int num_deps) {
+  // Ensure default instances of this proto file are initialized.
+  table->init_defaults();
+  // Ensure all dependent descriptors are registered to the generated descriptor
+  // pool and message factory.
+  for (int i = 0; i < num_deps; i++) {
+    // In case of weak fields deps[i] could be null.
+    if (deps[i]) deps[i]();
+  }
+  // Register the descriptor of this file.
+  DescriptorPool::InternalAddGeneratedFile(table->descriptor, table->size);
+  MessageFactory::InternalRegisterGeneratedFile(
+      table->filename, table->assign_descriptors_table);
+}
+
+}  // namespace
+
+void AssignDescriptors(AssignDescriptorsTable* table) {
+  call_once(table->once, AssignDescriptorsImpl, table);
+}
+
+void AddDescriptors(DescriptorTable* table, const InitFunc* deps,
+                    int num_deps) {
+  // AddDescriptors is not thread safe. Callers need to ensure calls are
+  // properly serialized. This function is only called pre-main by global
+  // descriptors and we can assume single threaded access or it's called
+  // by AssignDescriptorImpl which uses a mutex to sequence calls.
+  if (table->is_initialized) return;
+  table->is_initialized = true;
+  AddDescriptorsImpl(table, deps, num_deps);
+}
+
+// Separate function because it needs to be a friend of
+// GeneratedMessageReflection
 void RegisterAllTypesInternal(const Metadata* file_level_metadata, int size) {
   for (int i = 0; i < size; i++) {
     const GeneratedMessageReflection* reflection =
@@ -2400,26 +2420,28 @@ void RegisterAllTypesInternal(const Metadata* file_level_metadata, int size) {
            file_level_metadata[i].reflection);
     if (reflection) {
       // It's not a map type
-      ::google::protobuf::MessageFactory::InternalRegisterGeneratedMessage(
+      MessageFactory::InternalRegisterGeneratedMessage(
           file_level_metadata[i].descriptor,
           reflection->schema_.default_instance_);
     }
   }
 }
 
-void RegisterAllTypes(const Metadata* file_level_metadata, int size) {
-  RegisterAllTypesInternal(file_level_metadata, size);
+void RegisterFileLevelMetadata(void* assign_descriptors_table) {
+  auto table = static_cast<AssignDescriptorsTable*>(assign_descriptors_table);
+  AssignDescriptors(table);
+  RegisterAllTypesInternal(table->file_level_metadata, table->num_messages);
 }
 
 void UnknownFieldSetSerializer(const uint8* base, uint32 offset, uint32 tag,
                                uint32 has_offset,
-                               ::google::protobuf::io::CodedOutputStream* output) {
+                               io::CodedOutputStream* output) {
   const void* ptr = base + offset;
   const InternalMetadataWithArena* metadata =
       static_cast<const InternalMetadataWithArena*>(ptr);
   if (metadata->have_unknown_fields()) {
-    ::google::protobuf::internal::WireFormat::SerializeUnknownFields(
-        metadata->unknown_fields(), output);
+    internal::WireFormat::SerializeUnknownFields(metadata->unknown_fields(),
+                                                 output);
   }
 }
 

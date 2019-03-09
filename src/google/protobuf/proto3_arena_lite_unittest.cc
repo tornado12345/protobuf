@@ -28,8 +28,8 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <string>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <google/protobuf/unittest_proto3_arena.pb.h>
@@ -37,9 +37,9 @@
 #include <google/protobuf/testing/googletest.h>
 #include <gtest/gtest.h>
 
-namespace google {
 using proto3_arena_unittest::TestAllTypes;
 
+namespace google {
 namespace protobuf {
 namespace {
 // We selectively set/check a few representative fields rather than all fields
