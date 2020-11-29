@@ -37,8 +37,11 @@
 #include <google/protobuf/util/internal/utility.h>
 #include <google/protobuf/util/type_resolver.h>
 #include <google/protobuf/stubs/strutil.h>
-
 #include <google/protobuf/stubs/status.h>
+
+// clang-format off
+#include <google/protobuf/port_def.inc>
+// clang-format on
 
 namespace google {
 namespace protobuf {
@@ -302,7 +305,7 @@ class DescriptorPoolTypeResolver : public TypeResolver {
     return url_prefix_ + "/" + descriptor->full_name();
   }
 
-  Status ParseTypeUrl(const string& type_url, std::string* type_name) {
+  Status ParseTypeUrl(const std::string& type_url, std::string* type_name) {
     if (type_url.substr(0, url_prefix_.size() + 1) != url_prefix_ + "/") {
       return Status(
           util::error::INVALID_ARGUMENT,

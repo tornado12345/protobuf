@@ -41,10 +41,16 @@ This files defines well known classes which need extra maintenance including:
 __author__ = 'jieluo@google.com (Jie Luo)'
 
 import calendar
-import collections
 from datetime import datetime
 from datetime import timedelta
 import six
+
+try:
+  # Since python 3
+  import collections.abc as collections_abc
+except ImportError:
+  # Won't work after python 3.8
+  import collections as collections_abc
 
 from google.protobuf.descriptor import FieldDescriptor
 
@@ -60,6 +66,8 @@ _DURATION_SECONDS_MAX = 315576000000
 
 class Any(object):
   """Class for Any Message type."""
+
+  __slots__ = ()
 
   def Pack(self, msg, type_url_prefix='type.googleapis.com/',
            deterministic=None):
@@ -88,8 +96,13 @@ class Any(object):
     return '/' in self.type_url and self.TypeName() == descriptor.full_name
 
 
+_EPOCH_DATETIME = datetime.utcfromtimestamp(0)
+
+
 class Timestamp(object):
   """Class for Timestamp message type."""
+
+  __slots__ = ()
 
   def ToJsonString(self):
     """Converts Timestamp to RFC 3339 date string format.
@@ -147,6 +160,10 @@ class Timestamp(object):
     else:
       second_value = time_value[:point_position]
       nano_value = time_value[point_position + 1:]
+    if 't' in second_value:
+      raise ValueError(
+          'time data \'{0}\' does not match format \'%Y-%m-%dT%H:%M:%S\', '
+          'lowercase \'t\' is not accepted'.format(second_value))
     date_object = datetime.strptime(second_value, _TIMESTAMPFOMAT)
     td = date_object - datetime(1970, 1, 1)
     seconds = td.seconds + td.days * _SECONDS_PER_DAY
@@ -221,8 +238,9 @@ class Timestamp(object):
 
   def ToDatetime(self):
     """Converts Timestamp to datetime."""
-    return datetime.utcfromtimestamp(
-        self.seconds + self.nanos / float(_NANOS_PER_SECOND))
+    return _EPOCH_DATETIME + timedelta(
+        seconds=self.seconds, microseconds=_RoundTowardZero(
+            self.nanos, _NANOS_PER_MICROSECOND))
 
   def FromDatetime(self, dt):
     """Converts datetime to Timestamp."""
@@ -239,6 +257,8 @@ class Timestamp(object):
 
 class Duration(object):
   """Class for Duration message type."""
+
+  __slots__ = ()
 
   def ToJsonString(self):
     """Converts Duration to string format.
@@ -381,7 +401,7 @@ def _CheckDurationValid(seconds, nanos):
 
 def _RoundTowardZero(value, divider):
   """Truncates the remainder part after division."""
-  # For some languanges, the sign of the remainder is implementation
+  # For some languages, the sign of the remainder is implementation
   # dependent if any of the operands is negative. Here we enforce
   # "rounded toward zero" semantics. For example, for (-5) / 2 an
   # implementation may give -3 as the result with the remainder being
@@ -396,6 +416,8 @@ def _RoundTowardZero(value, divider):
 
 class FieldMask(object):
   """Class for FieldMask message type."""
+
+  __slots__ = ()
 
   def ToJsonString(self):
     """Converts FieldMask to string according to proto3 JSON spec."""
@@ -553,6 +575,8 @@ class _FieldMaskTree(object):
   In the tree, each leaf node represents a field path.
   """
 
+  __slots__ = ('_root',)
+
   def __init__(self, field_mask=None):
     """Initializes the tree by FieldMask."""
     self._root = {}
@@ -702,10 +726,10 @@ def _SetStructValue(struct_value, value):
     struct_value.string_value = value
   elif isinstance(value, _INT_OR_FLOAT):
     struct_value.number_value = value
-  elif isinstance(value, dict):
+  elif isinstance(value, (dict, Struct)):
     struct_value.struct_value.Clear()
     struct_value.struct_value.update(value)
-  elif isinstance(value, list):
+  elif isinstance(value, (list, ListValue)):
     struct_value.list_value.Clear()
     struct_value.list_value.extend(value)
   else:
@@ -733,7 +757,7 @@ def _GetStructValue(struct_value):
 class Struct(object):
   """Class for Struct message type."""
 
-  __slots__ = []
+  __slots__ = ()
 
   def __getitem__(self, key):
     return _GetStructValue(self.fields[key])
@@ -780,11 +804,13 @@ class Struct(object):
     for key, value in dictionary.items():
       _SetStructValue(self.fields[key], value)
 
-collections.MutableMapping.register(Struct)
+collections_abc.MutableMapping.register(Struct)
 
 
 class ListValue(object):
   """Class for ListValue message type."""
+
+  __slots__ = ()
 
   def __len__(self):
     return len(self.values)
@@ -824,7 +850,7 @@ class ListValue(object):
     list_value.Clear()
     return list_value
 
-collections.MutableSequence.register(ListValue)
+collections_abc.MutableSequence.register(ListValue)
 
 
 WKTBASES = {

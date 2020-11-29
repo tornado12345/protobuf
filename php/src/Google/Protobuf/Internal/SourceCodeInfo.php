@@ -9,7 +9,6 @@ use Google\Protobuf\Internal\GPBWire;
 use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\InputStream;
 use Google\Protobuf\Internal\GPBUtil;
-use Google\Protobuf\Internal\GPBWrapperUtils;
 
 /**
  * Encapsulates information about the original source file from which a
@@ -65,7 +64,6 @@ class SourceCodeInfo extends \Google\Protobuf\Internal\Message
      * Generated from protobuf field <code>repeated .google.protobuf.SourceCodeInfo.Location location = 1;</code>
      */
     private $location;
-    private $has_location = false;
 
     /**
      * Constructor.
@@ -224,14 +222,8 @@ class SourceCodeInfo extends \Google\Protobuf\Internal\Message
     {
         $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::MESSAGE, \Google\Protobuf\Internal\SourceCodeInfo\Location::class);
         $this->location = $arr;
-        $this->has_location = true;
 
         return $this;
-    }
-
-    public function hasLocation()
-    {
-        return $this->has_location;
     }
 
 }

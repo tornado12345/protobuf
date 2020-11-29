@@ -30,23 +30,22 @@
 
 #include <google/protobuf/util/time_util.h>
 
-#include <google/protobuf/stubs/int128.h>
 #include <google/protobuf/stubs/stringprintf.h>
 #include <google/protobuf/stubs/strutil.h>
-#include <google/protobuf/stubs/time.h>
 #include <google/protobuf/duration.pb.h>
 #include <google/protobuf/timestamp.pb.h>
+#include <google/protobuf/stubs/int128.h>
+#include <google/protobuf/stubs/time.h>
 
-
-
+// Must go after other includes.
 #include <google/protobuf/port_def.inc>
 
 namespace google {
 namespace protobuf {
 namespace util {
 
-using google::protobuf::Timestamp;
 using google::protobuf::Duration;
+using google::protobuf::Timestamp;
 
 namespace {
 static const int kNanosPerSecond = 1000000000;

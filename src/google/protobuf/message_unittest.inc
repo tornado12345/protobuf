@@ -35,17 +35,19 @@
 // This file needs to be included as .inc as it depends on certain macros being
 // defined prior to its inclusion.
 
-#include <google/protobuf/message.h>
-
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#include <google/protobuf/message.h>
 #ifndef _MSC_VER
 #include <unistd.h>
 #endif
 #include <fstream>
 #include <sstream>
 
+#include <google/protobuf/stubs/logging.h>
+#include <google/protobuf/stubs/common.h>
 #include <google/protobuf/test_util2.h>
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/io/zero_copy_stream.h>
@@ -54,13 +56,11 @@
 #include <google/protobuf/arena.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/generated_message_reflection.h>
-
-#include <google/protobuf/stubs/logging.h>
-#include <google/protobuf/stubs/common.h>
-#include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/testing/googletest.h>
 #include <gtest/gtest.h>
-#include <google/protobuf/stubs/io_win32.h>
+#include <google/protobuf/stubs/logging.h>
+#include <google/protobuf/io/io_win32.h>
+
 
 namespace google {
 namespace protobuf {
@@ -68,8 +68,8 @@ namespace protobuf {
 #if defined(_WIN32)
 // DO NOT include <io.h>, instead create functions in io_win32.{h,cc} and import
 // them like we do below.
-using google::protobuf::internal::win32::close;
-using google::protobuf::internal::win32::open;
+using google::protobuf::io::win32::close;
+using google::protobuf::io::win32::open;
 #endif
 
 #ifndef O_BINARY
@@ -235,6 +235,10 @@ TEST(MESSAGE_TEST_NAME, DynamicCastToGenerated) {
                 test_all_types_pointer_const));
   EXPECT_EQ(nullptr, DynamicCastToGenerated<const UNITTEST::TestRequired>(
                          test_all_types_pointer_const));
+
+  Message* test_all_types_pointer_nullptr = nullptr;
+  EXPECT_EQ(nullptr, DynamicCastToGenerated<UNITTEST::TestAllTypes>(
+                         test_all_types_pointer_nullptr));
 }
 
 #ifdef PROTOBUF_HAS_DEATH_TEST  // death tests do not work on Windows yet.
@@ -269,7 +273,7 @@ class RepeatedInputStream : public io::ZeroCopyInputStream {
   RepeatedInputStream(const std::string& data, size_t count)
       : data_(data), count_(count), position_(0), total_byte_count_(0) {}
 
-  virtual bool Next(const void** data, int* size) {
+  bool Next(const void** data, int* size) override {
     if (position_ == data_.size()) {
       if (--count_ == 0) {
         return false;
@@ -283,12 +287,12 @@ class RepeatedInputStream : public io::ZeroCopyInputStream {
     return true;
   }
 
-  virtual void BackUp(int count) {
+  void BackUp(int count) override {
     position_ -= static_cast<size_t>(count);
     total_byte_count_ -= count;
   }
 
-  virtual bool Skip(int count) {
+  bool Skip(int count) override {
     while (count > 0) {
       const void* data;
       int size;
@@ -305,11 +309,11 @@ class RepeatedInputStream : public io::ZeroCopyInputStream {
     return false;
   }
 
-  virtual int64 ByteCount() const { return total_byte_count_; }
+  int64_t ByteCount() const override { return total_byte_count_; }
 
  private:
   std::string data_;
-  size_t count_;     // The number of strings that haven't been consuemd.
+  size_t count_;     // The number of strings that haven't been consumed.
   size_t position_;  // Position in the std::string for the next read.
   int64 total_byte_count_;
 };
@@ -331,7 +335,7 @@ TEST(MESSAGE_TEST_NAME, TestParseMessagesCloseTo2G) {
   UNITTEST::TestAllTypes result;
   EXPECT_TRUE(result.ParseFromZeroCopyStream(&input));
 
-  // When there are multiple occurences of a singulr field, the last one
+  // When there are multiple occurrences of a singular field, the last one
   // should win.
   EXPECT_EQ(value, result.optional_string());
 }
@@ -627,7 +631,6 @@ TEST(MESSAGE_TEST_NAME, MOMIParserEdgeCases) {
     EXPECT_FALSE(msg.ParsePartialFromZeroCopyStream(&zcis));
   }
 }
-
 
 
 }  // namespace protobuf

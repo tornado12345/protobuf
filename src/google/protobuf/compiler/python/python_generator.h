@@ -52,7 +52,9 @@ class FieldDescriptor;
 class OneofDescriptor;
 class ServiceDescriptor;
 
-namespace io { class Printer; }
+namespace io {
+class Printer;
+}
 
 namespace compiler {
 namespace python {
@@ -67,10 +69,11 @@ class PROTOC_EXPORT Generator : public CodeGenerator {
   virtual ~Generator();
 
   // CodeGenerator methods.
-  virtual bool Generate(const FileDescriptor* file,
-                        const std::string& parameter,
-                        GeneratorContext* generator_context,
-                        std::string* error) const;
+  bool Generate(const FileDescriptor* file, const std::string& parameter,
+                GeneratorContext* generator_context,
+                std::string* error) const override;
+
+  uint64_t GetSupportedFeatures() const override;
 
  private:
   void PrintImports() const;
@@ -82,8 +85,8 @@ class PROTOC_EXPORT Generator : public CodeGenerator {
 
   void PrintTopLevelExtensions() const;
 
-  void PrintFieldDescriptor(
-      const FieldDescriptor& field, bool is_extension) const;
+  void PrintFieldDescriptor(const FieldDescriptor& field,
+                            bool is_extension) const;
   void PrintFieldDescriptorsInDescriptor(
       const Descriptor& message_descriptor, bool is_extension,
       const std::string& list_variable_name, int (Descriptor::*CountFn)() const,
@@ -146,8 +149,8 @@ class PROTOC_EXPORT Generator : public CodeGenerator {
       const ServiceDescriptor& descriptor) const;
 
   template <typename DescriptorT, typename DescriptorProtoT>
-  void PrintSerializedPbInterval(
-      const DescriptorT& descriptor, DescriptorProtoT& proto) const;
+  void PrintSerializedPbInterval(const DescriptorT& descriptor,
+                                 DescriptorProtoT& proto) const;
 
   void FixAllDescriptorOptions() const;
   void FixOptionsForField(const FieldDescriptor& field) const;
@@ -164,6 +167,7 @@ class PROTOC_EXPORT Generator : public CodeGenerator {
   mutable const FileDescriptor* file_;  // Set in Generate().  Under mutex_.
   mutable std::string file_descriptor_serialized_;
   mutable io::Printer* printer_;  // Set in Generate().  Under mutex_.
+  mutable bool pure_python_workable_;
 
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(Generator);
 };

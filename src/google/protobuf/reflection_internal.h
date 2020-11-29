@@ -82,7 +82,7 @@ class RandomAccessRepeatedFieldAccessor : public RepeatedFieldAccessor {
 
 // Base class for RepeatedFieldAccessor implementations that manipulates
 // RepeatedField<T>.
-template<typename T>
+template <typename T>
 class RepeatedFieldWrapper : public RandomAccessRepeatedFieldAccessor {
  public:
   RepeatedFieldWrapper() {}
@@ -122,7 +122,7 @@ class RepeatedFieldWrapper : public RandomAccessRepeatedFieldAccessor {
     return reinterpret_cast<RepeatedFieldType*>(data);
   }
 
-  // Convert an object recevied by this accessor to an object to be stored in
+  // Convert an object received by this accessor to an object to be stored in
   // the underlying RepeatedField.
   virtual T ConvertToT(const Value* value) const = 0;
 
@@ -137,7 +137,7 @@ class RepeatedFieldWrapper : public RandomAccessRepeatedFieldAccessor {
 
 // Base class for RepeatedFieldAccessor implementations that manipulates
 // RepeatedPtrField<T>.
-template<typename T>
+template <typename T>
 class RepeatedPtrFieldWrapper : public RandomAccessRepeatedFieldAccessor {
  public:
   bool IsEmpty(const Field* data) const override {

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-#
 # Protocol Buffers - Google's data interchange format
 # Copyright 2008 Google Inc.  All rights reserved.
 # https://developers.google.com/protocol-buffers/
@@ -38,8 +37,6 @@ See conformance.proto for more information.
 import struct
 import sys
 import os
-from google.protobuf import descriptor
-from google.protobuf import descriptor_pool
 from google.protobuf import json_format
 from google.protobuf import message
 from google.protobuf import test_messages_proto3_pb2
@@ -166,7 +163,8 @@ def do_test(request):
         return response
 
     elif request.requested_output_format == conformance_pb2.TEXT_FORMAT:
-      response.text_payload = text_format.MessageToString(test_message)
+      response.text_payload = text_format.MessageToString(
+          test_message, print_unknown_fields=request.print_unknown_fields)
 
   except Exception as e:
     response.runtime_error = str(e)

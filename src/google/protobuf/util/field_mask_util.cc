@@ -30,9 +30,11 @@
 
 #include <google/protobuf/util/field_mask_util.h>
 
+#include <google/protobuf/message.h>
 #include <google/protobuf/stubs/strutil.h>
-
 #include <google/protobuf/stubs/map_util.h>
+
+#include <google/protobuf/port_def.inc>
 
 namespace google {
 namespace protobuf {
@@ -160,8 +162,8 @@ bool FieldMaskUtil::GetFieldDescriptors(
   return true;
 }
 
-void FieldMaskUtil::GetFieldMaskForAllFields(
-    const Descriptor* descriptor, FieldMask* out) {
+void FieldMaskUtil::GetFieldMaskForAllFields(const Descriptor* descriptor,
+                                             FieldMask* out) {
   for (int i = 0; i < descriptor->field_count(); ++i) {
     out->add_paths(descriptor->field(i)->name());
   }
@@ -197,7 +199,7 @@ class FieldMaskTree {
 
   // Remove a path from the tree.
   // If the path is a sub-path of an existing field path in the tree, it means
-  // we need remove the existing fied path and add all sub-paths except
+  // we need remove the existing field path and add all sub-paths except
   // specified path. If the path matches an existing node in the tree, this node
   // will be moved.
   void RemovePath(const std::string& path, const Descriptor* descriptor);
@@ -330,7 +332,7 @@ void FieldMaskTree::AddPath(const std::string& path) {
   for (int i = 0; i < parts.size(); ++i) {
     if (!new_branch && node != &root_ && node->children.empty()) {
       // Path matches an existing leaf node. This means the path is already
-      // coverred by this tree (for example, adding "foo.bar.baz" to a tree
+      // covered by this tree (for example, adding "foo.bar.baz" to a tree
       // which already contains "foo.bar").
       return;
     }
@@ -548,8 +550,8 @@ void FieldMaskTree::MergeMessage(const Node* node, const Message& source,
   }
 }
 
-void FieldMaskTree::AddRequiredFieldPath(
-    Node* node, const Descriptor* descriptor) {
+void FieldMaskTree::AddRequiredFieldPath(Node* node,
+                                         const Descriptor* descriptor) {
   const int32 field_count = descriptor->field_count();
   for (int index = 0; index < field_count; ++index) {
     const FieldDescriptor* field = descriptor->field(index);
@@ -559,7 +561,7 @@ void FieldMaskTree::AddRequiredFieldPath(
       if (child == nullptr) {
         // Add required field path to the tree
         child = new Node();
-      } else if (child->children.empty()){
+      } else if (child->children.empty()) {
         // If the required field is in the tree and does not have any children,
         // do nothing.
         continue;
@@ -705,7 +707,7 @@ bool FieldMaskUtil::TrimMessage(const FieldMask& mask, Message* message,
   // fields.
   FieldMaskTree tree;
   tree.MergeFromFieldMask(mask);
-  // If keep_required_fields is true, implicitely add required fields of
+  // If keep_required_fields is true, implicitly add required fields of
   // a message present in the tree to prevent from trimming.
   if (options.keep_required_fields()) {
     tree.AddRequiredFieldPath(GOOGLE_CHECK_NOTNULL(message->GetDescriptor()));

@@ -41,9 +41,12 @@
 #include <google/protobuf/test_util_lite.h>
 #include <google/protobuf/unittest_lite.pb.h>
 #include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/io/zero_copy_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #include <google/protobuf/wire_format_lite.h>
 #include <gtest/gtest.h>
+#include <google/protobuf/stubs/strutil.h>
 
 namespace google {
 namespace protobuf {
@@ -55,10 +58,9 @@ void ExpectMessageMerged(const unittest::TestAllTypesLite& message) {
   EXPECT_EQ(message.optional_string(), "hello");
 }
 
-void AssignParsingMergeMessages(
-    unittest::TestAllTypesLite* msg1,
-    unittest::TestAllTypesLite* msg2,
-    unittest::TestAllTypesLite* msg3) {
+void AssignParsingMergeMessages(unittest::TestAllTypesLite* msg1,
+                                unittest::TestAllTypesLite* msg2,
+                                unittest::TestAllTypesLite* msg3) {
   msg1->set_optional_int32(1);
   msg2->set_optional_int64(2);
   msg3->set_optional_int32(3);
@@ -173,10 +175,10 @@ TEST(Lite, AllLite5) {
     unittest::TestAllTypesLite* msg2;
     unittest::TestAllTypesLite* msg3;
 
-#define ASSIGN_REPEATED_FIELD(FIELD)                \
-  msg1 = generator.add_##FIELD();                   \
-  msg2 = generator.add_##FIELD();                   \
-  msg3 = generator.add_##FIELD();                   \
+#define ASSIGN_REPEATED_FIELD(FIELD) \
+  msg1 = generator.add_##FIELD();    \
+  msg2 = generator.add_##FIELD();    \
+  msg3 = generator.add_##FIELD();    \
   AssignParsingMergeMessages(msg1, msg2, msg3)
 
     ASSIGN_REPEATED_FIELD(field1);
@@ -446,8 +448,7 @@ TEST(Lite, AllLite18) {
     protobuf_unittest::TestMessageMapLite message;
 
     // Creates a TestAllTypes with default value
-    TestUtilLite::ExpectClear(
-        (*message.mutable_map_int32_message())[0]);
+    TestUtilLite::ExpectClear((*message.mutable_map_int32_message())[0]);
   }
 }
 
@@ -614,7 +615,7 @@ TEST(Lite, AllLite28) {
     protobuf_unittest::TestMapLite message1, message2;
     std::string data;
     MapLiteTestUtil::SetMapFields(&message1);
-    int size = message1.ByteSize();
+    size_t size = message1.ByteSizeLong();
     data.resize(size);
     ::google::protobuf::uint8* start = reinterpret_cast<::google::protobuf::uint8*>(::google::protobuf::string_as_array(&data));
     ::google::protobuf::uint8* end = message1.SerializeWithCachedSizesToArray(start);
@@ -631,7 +632,7 @@ TEST(Lite, AllLite29) {
     // Test the generated SerializeWithCachedSizes()
     protobuf_unittest::TestMapLite message1, message2;
     MapLiteTestUtil::SetMapFields(&message1);
-    int size = message1.ByteSize();
+    size_t size = message1.ByteSizeLong();
     std::string data;
     data.resize(size);
     {
@@ -835,30 +836,30 @@ TEST(Lite, AllLite42) {
   std::string data;
 
   {
-      // Check that adding more values to enum does not corrupt message
-      // when passed through an old client.
-      protobuf_unittest::V2MessageLite v2_message;
-      v2_message.set_int_field(800);
-      // Set enum field to the value not understood by the old client.
-      v2_message.set_enum_field(protobuf_unittest::V2_SECOND);
-      std::string v2_bytes = v2_message.SerializeAsString();
+    // Check that adding more values to enum does not corrupt message
+    // when passed through an old client.
+    protobuf_unittest::V2MessageLite v2_message;
+    v2_message.set_int_field(800);
+    // Set enum field to the value not understood by the old client.
+    v2_message.set_enum_field(protobuf_unittest::V2_SECOND);
+    std::string v2_bytes = v2_message.SerializeAsString();
 
-      protobuf_unittest::V1MessageLite v1_message;
-      v1_message.ParseFromString(v2_bytes);
-      EXPECT_TRUE(v1_message.IsInitialized());
-      EXPECT_EQ(v1_message.int_field(), v2_message.int_field());
-      // V1 client does not understand V2_SECOND value, so it discards it and
-      // uses default value instead.
-      EXPECT_EQ(v1_message.enum_field(), protobuf_unittest::V1_FIRST);
+    protobuf_unittest::V1MessageLite v1_message;
+    v1_message.ParseFromString(v2_bytes);
+    EXPECT_TRUE(v1_message.IsInitialized());
+    EXPECT_EQ(v1_message.int_field(), v2_message.int_field());
+    // V1 client does not understand V2_SECOND value, so it discards it and
+    // uses default value instead.
+    EXPECT_EQ(v1_message.enum_field(), protobuf_unittest::V1_FIRST);
 
-      // However, when re-serialized, it should preserve enum value.
-      std::string v1_bytes = v1_message.SerializeAsString();
+    // However, when re-serialized, it should preserve enum value.
+    std::string v1_bytes = v1_message.SerializeAsString();
 
-      protobuf_unittest::V2MessageLite same_v2_message;
-      same_v2_message.ParseFromString(v1_bytes);
+    protobuf_unittest::V2MessageLite same_v2_message;
+    same_v2_message.ParseFromString(v1_bytes);
 
-      EXPECT_EQ(v2_message.int_field(), same_v2_message.int_field());
-      EXPECT_EQ(v2_message.enum_field(), same_v2_message.enum_field());
+    EXPECT_EQ(v2_message.int_field(), same_v2_message.int_field());
+    EXPECT_EQ(v2_message.enum_field(), same_v2_message.enum_field());
   }
 }
 
@@ -1047,6 +1048,224 @@ TEST(Lite, MapCrash) {
   //   MapEnumLite value = too long varint (parse error)
   EXPECT_FALSE(msg->ParseFromString(
       "\202\1\15\10\1\200\200\200\200\200\200\200\200\200\200\1"));
+}
+
+TEST(Lite, CorrectEnding) {
+  protobuf_unittest::TestAllTypesLite msg;
+  {
+    // All proto wireformat parsers should act the same on parsing data in as
+    // much as it concerns the parsing, ie. not the interpretation of the data.
+    // TestAllTypesLite is not a group inside another message. So in practice
+    // will not encounter an end-group tag. However the parser should behave
+    // like any wire format parser should.
+    static const char kWireFormat[] = "\204\1";
+    io::CodedInputStream cis(reinterpret_cast<const uint8*>(kWireFormat), 2);
+    // The old CodedInputStream parser got an optimization (ReadTagNoLastTag)
+    // for non-group messages (like TestAllTypesLite) which made it not accept
+    // end-group. This is not a real big deal, but I think going forward its
+    // good to have all parse loops behave 'exactly' the same.
+    EXPECT_TRUE(msg.MergePartialFromCodedStream(&cis));
+    EXPECT_FALSE(cis.ConsumedEntireMessage());
+    EXPECT_TRUE(cis.LastTagWas(132));
+  }
+  {
+    // This is an incomplete end-group tag. This should be a genuine parse
+    // failure.
+    static const char kWireFormat[] = "\214";
+    io::CodedInputStream cis(reinterpret_cast<const uint8*>(kWireFormat), 1);
+    // Unfortunately the old parser detects a parse error in ReadTag and returns
+    // 0 (as it states 0 is an invalid tag). However 0 is not an invalid tag
+    // as it can be used to terminate the stream, so this returns true.
+    EXPECT_FALSE(msg.MergePartialFromCodedStream(&cis));
+  }
+}
+
+TEST(Lite, DebugString) {
+  protobuf_unittest::TestAllTypesLite message1, message2;
+  EXPECT_TRUE(HasPrefixString(message1.DebugString(), "MessageLite at 0x"));
+  EXPECT_TRUE(HasPrefixString(message2.DebugString(), "MessageLite at 0x"));
+
+  // DebugString() and ShortDebugString() are the same for now.
+  EXPECT_EQ(message1.DebugString(), message1.ShortDebugString());
+
+  // Even identical lite protos should have different DebugString() output. Part
+  // of the reason for including the memory address is so that we get some
+  // non-determinism, which should make it easier for us to change the output
+  // later without breaking any code.
+  EXPECT_NE(message1.DebugString(), message2.DebugString());
+}
+
+TEST(Lite, EnumValueToName) {
+  EXPECT_EQ("FOREIGN_LITE_FOO", protobuf_unittest::ForeignEnumLite_Name(
+                                    protobuf_unittest::FOREIGN_LITE_FOO));
+  EXPECT_EQ("FOREIGN_LITE_BAR", protobuf_unittest::ForeignEnumLite_Name(
+                                    protobuf_unittest::FOREIGN_LITE_BAR));
+  EXPECT_EQ("FOREIGN_LITE_BAZ", protobuf_unittest::ForeignEnumLite_Name(
+                                    protobuf_unittest::FOREIGN_LITE_BAZ));
+  EXPECT_EQ("", protobuf_unittest::ForeignEnumLite_Name(0));
+  EXPECT_EQ("", protobuf_unittest::ForeignEnumLite_Name(999));
+}
+
+TEST(Lite, NestedEnumValueToName) {
+  EXPECT_EQ("FOO", protobuf_unittest::TestAllTypesLite::NestedEnum_Name(
+                       protobuf_unittest::TestAllTypesLite::FOO));
+  EXPECT_EQ("BAR", protobuf_unittest::TestAllTypesLite::NestedEnum_Name(
+                       protobuf_unittest::TestAllTypesLite::BAR));
+  EXPECT_EQ("BAZ", protobuf_unittest::TestAllTypesLite::NestedEnum_Name(
+                       protobuf_unittest::TestAllTypesLite::BAZ));
+  EXPECT_EQ("", protobuf_unittest::TestAllTypesLite::NestedEnum_Name(0));
+  EXPECT_EQ("", protobuf_unittest::TestAllTypesLite::NestedEnum_Name(999));
+}
+
+TEST(Lite, EnumNameToValue) {
+  protobuf_unittest::ForeignEnumLite value;
+
+  ASSERT_TRUE(
+      protobuf_unittest::ForeignEnumLite_Parse("FOREIGN_LITE_FOO", &value));
+  EXPECT_EQ(protobuf_unittest::FOREIGN_LITE_FOO, value);
+
+  ASSERT_TRUE(
+      protobuf_unittest::ForeignEnumLite_Parse("FOREIGN_LITE_BAR", &value));
+  EXPECT_EQ(protobuf_unittest::FOREIGN_LITE_BAR, value);
+
+  ASSERT_TRUE(
+      protobuf_unittest::ForeignEnumLite_Parse("FOREIGN_LITE_BAZ", &value));
+  EXPECT_EQ(protobuf_unittest::FOREIGN_LITE_BAZ, value);
+
+  // Non-existent values
+  EXPECT_FALSE(protobuf_unittest::ForeignEnumLite_Parse("E", &value));
+  EXPECT_FALSE(
+      protobuf_unittest::ForeignEnumLite_Parse("FOREIGN_LITE_C", &value));
+  EXPECT_FALSE(protobuf_unittest::ForeignEnumLite_Parse("G", &value));
+}
+
+TEST(Lite, NestedEnumNameToValue) {
+  protobuf_unittest::TestAllTypesLite::NestedEnum value;
+
+  ASSERT_TRUE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("FOO", &value));
+  EXPECT_EQ(protobuf_unittest::TestAllTypesLite::FOO, value);
+
+  ASSERT_TRUE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("BAR", &value));
+  EXPECT_EQ(protobuf_unittest::TestAllTypesLite::BAR, value);
+
+  ASSERT_TRUE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("BAZ", &value));
+  EXPECT_EQ(protobuf_unittest::TestAllTypesLite::BAZ, value);
+
+  // Non-existent values
+  EXPECT_FALSE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("A", &value));
+  EXPECT_FALSE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("C", &value));
+  EXPECT_FALSE(
+      protobuf_unittest::TestAllTypesLite::NestedEnum_Parse("G", &value));
+}
+
+TEST(Lite, AliasedEnum) {
+  // Enums with allow_alias = true can have multiple entries with the same
+  // value.
+  EXPECT_EQ("FOO1", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(
+                        protobuf_unittest::DupEnum::FOO1));
+  EXPECT_EQ("FOO1", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(
+                        protobuf_unittest::DupEnum::FOO2));
+  EXPECT_EQ("BAR1", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(
+                        protobuf_unittest::DupEnum::BAR1));
+  EXPECT_EQ("BAR1", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(
+                        protobuf_unittest::DupEnum::BAR2));
+  EXPECT_EQ("BAZ", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(
+                       protobuf_unittest::DupEnum::BAZ));
+  EXPECT_EQ("", protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Name(999));
+
+  protobuf_unittest::DupEnum::TestEnumWithDupValueLite value;
+  ASSERT_TRUE(
+      protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Parse("FOO1", &value));
+  EXPECT_EQ(protobuf_unittest::DupEnum::FOO1, value);
+
+  value = static_cast<protobuf_unittest::DupEnum::TestEnumWithDupValueLite>(0);
+  ASSERT_TRUE(
+      protobuf_unittest::DupEnum::TestEnumWithDupValueLite_Parse("FOO2", &value));
+  EXPECT_EQ(protobuf_unittest::DupEnum::FOO2, value);
+}
+
+
+TEST(Lite, CodedInputStreamRollback) {
+  {
+    protobuf_unittest::TestAllTypesLite m;
+    m.set_optional_bytes(std::string(30, 'a'));
+    std::string serialized = m.SerializeAsString();
+    serialized += '\014';
+    serialized += std::string(3, ' ');
+    io::ArrayInputStream is(serialized.data(), serialized.size(),
+                            serialized.size() - 6);
+    {
+      io::CodedInputStream cis(&is);
+      m.Clear();
+      m.MergePartialFromCodedStream(&cis);
+      EXPECT_TRUE(cis.LastTagWas(12));
+      EXPECT_FALSE(cis.ConsumedEntireMessage());
+      // Should leave is with 3 spaces;
+    }
+    const void* data;
+    int size;
+    ASSERT_TRUE(is.Next(&data, &size));
+    ASSERT_EQ(size, 3);
+    EXPECT_EQ(memcmp(data, "   ", 3), 0);
+  }
+  {
+    protobuf_unittest::TestPackedTypesLite m;
+    constexpr int kCount = 30;
+    for (int i = 0; i < kCount; i++) m.add_packed_fixed32(i);
+    std::string serialized = m.SerializeAsString();
+    serialized += '\014';
+    serialized += std::string(3, ' ');
+    // Buffer breaks in middle of a fixed32.
+    io::ArrayInputStream is(serialized.data(), serialized.size(),
+                            serialized.size() - 7);
+    {
+      io::CodedInputStream cis(&is);
+      m.Clear();
+      m.MergePartialFromCodedStream(&cis);
+      EXPECT_TRUE(cis.LastTagWas(12));
+      EXPECT_FALSE(cis.ConsumedEntireMessage());
+      // Should leave is with 3 spaces;
+    }
+    ASSERT_EQ(m.packed_fixed32_size(), kCount);
+    for (int i = 0; i < kCount; i++) EXPECT_EQ(m.packed_fixed32(i), i);
+    const void* data;
+    int size;
+    ASSERT_TRUE(is.Next(&data, &size));
+    ASSERT_EQ(size, 3);
+    EXPECT_EQ(memcmp(data, "   ", 3), 0);
+  }
+  {
+    protobuf_unittest::TestPackedTypesLite m;
+    constexpr int kCount = 30;
+    // Make sure we output 2 byte varints
+    for (int i = 0; i < kCount; i++) m.add_packed_fixed32(128 + i);
+    std::string serialized = m.SerializeAsString();
+    serialized += '\014';
+    serialized += std::string(3, ' ');
+    // Buffer breaks in middle of a 2 byte varint.
+    io::ArrayInputStream is(serialized.data(), serialized.size(),
+                            serialized.size() - 5);
+    {
+      io::CodedInputStream cis(&is);
+      m.Clear();
+      m.MergePartialFromCodedStream(&cis);
+      EXPECT_TRUE(cis.LastTagWas(12));
+      EXPECT_FALSE(cis.ConsumedEntireMessage());
+      // Should leave is with 3 spaces;
+    }
+    ASSERT_EQ(m.packed_fixed32_size(), kCount);
+    for (int i = 0; i < kCount; i++) EXPECT_EQ(m.packed_fixed32(i), i + 128);
+    const void* data;
+    int size;
+    ASSERT_TRUE(is.Next(&data, &size));
+    ASSERT_EQ(size, 3);
+    EXPECT_EQ(memcmp(data, "   ", 3), 0);
+  }
 }
 
 }  // namespace protobuf

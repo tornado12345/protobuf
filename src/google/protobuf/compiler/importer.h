@@ -37,20 +37,22 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_IMPORTER_H__
 #define GOOGLE_PROTOBUF_COMPILER_IMPORTER_H__
 
-#include <string>
-#include <vector>
 #include <set>
+#include <string>
 #include <utility>
+#include <vector>
+#include <google/protobuf/compiler/parser.h>
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/descriptor_database.h>
-#include <google/protobuf/compiler/parser.h>
 
 #include <google/protobuf/port_def.inc>
 
 namespace google {
 namespace protobuf {
 
-namespace io { class ZeroCopyInputStream; }
+namespace io {
+class ZeroCopyInputStream;
+}
 
 namespace compiler {
 
@@ -154,8 +156,7 @@ class PROTOBUF_EXPORT SourceTreeDescriptorDatabase : public DescriptorDatabase {
 // TODO(kenton):  I feel like this class is not well-named.
 class PROTOBUF_EXPORT Importer {
  public:
-  Importer(SourceTree* source_tree,
-           MultiFileErrorCollector* error_collector);
+  Importer(SourceTree* source_tree, MultiFileErrorCollector* error_collector);
   ~Importer();
 
   // Import the given file and build a FileDescriptor representing it.  If
@@ -175,11 +176,10 @@ class PROTOBUF_EXPORT Importer {
 
   // The DescriptorPool in which all imported FileDescriptors and their
   // contents are stored.
-  inline const DescriptorPool* pool() const {
-    return &pool_;
-  }
+  inline const DescriptorPool* pool() const { return &pool_; }
 
-  void AddUnusedImportTrackFile(const std::string& file_name);
+  void AddUnusedImportTrackFile(const std::string& file_name,
+                                bool is_error = false);
   void ClearUnusedImportTrackFiles();
 
 
@@ -255,7 +255,7 @@ class PROTOBUF_EXPORT DiskSourceTree : public SourceTree {
   // and then you do:
   //   Open("bar/qux");
   // the DiskSourceTree will first try to open foo/bar/qux, then baz/bar/qux,
-  // returning the first one that opens successfuly.
+  // returning the first one that opens successfully.
   //
   // disk_path may be an absolute path or relative to the current directory,
   // just like a path you'd pass to open().
